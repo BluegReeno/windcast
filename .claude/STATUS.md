@@ -8,17 +8,26 @@
 
 ## Current Focus
 
-**Task File**: `.claude/tasks/phase-1-1-project-setup.md` (COMPLETE)
+**Task File**: `.claude/tasks/phase-1-2-data-ingestion.md` (COMPLETE)
 
 ### Priority Order
 
 1. **Phase 1.1 — Project Setup** - DONE ✓
-2. **Phase 1.2 — Data Ingestion** - Next up
-3. **Phase 1.3 — Feature Engineering** - Pending
+2. **Phase 1.2 — Data Ingestion** - DONE ✓
+3. **Phase 1.3 — Feature Engineering** - Next up
 
 ---
 
 ## What's DONE
+
+### Phase 1.2: Data Ingestion & QC Pipeline
+- [x] `config.py` — Pydantic Settings with 3 dataset configs, QC thresholds
+- [x] `schema.py` — 15-column canonical SCADA schema + validation
+- [x] `kelmarsh.py` — Nested ZIP parser with signal mapping, pitch averaging, power conversion
+- [x] `qc.py` — 9 QC rules (maintenance, outliers, curtailment, frozen sensors, gap-fill)
+- [x] `open_meteo.py` — Cached Open-Meteo historical weather client
+- [x] `ingest_kelmarsh.py` — CLI script: parse → QC → per-turbine Parquet
+- [x] 50 tests passing, ruff ✓, pyright ✓
 
 ### Phase 1.1: Project Setup
 - [x] `pyproject.toml` with all deps + tool configs
@@ -72,4 +81,4 @@ tests/
 
 ---
 
-**Next Action**: Start Phase 1.2 — Data Ingestion (Kelmarsh dataset)
+**Next Action**: Start Phase 1.3 — Feature Engineering
