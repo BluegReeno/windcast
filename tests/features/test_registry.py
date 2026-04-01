@@ -1,0 +1,59 @@
+"""Tests for windcast.features.registry module."""
+
+import pytest
+
+from windcast.features.registry import (
+    FEATURE_REGISTRY,
+    FeatureSet,
+    get_feature_set,
+    list_feature_sets,
+)
+
+
+class TestGetFeatureSet:
+    def test_baseline_returns_correct_columns(self):
+        fs = get_feature_set("wind_baseline")
+        assert fs.name == "wind_baseline"
+        assert "wind_speed_ms" in fs.columns
+        assert "active_power_kw_lag1" in fs.columns
+        assert "wind_dir_sin" in fs.columns
+
+    def test_enriched_extends_baseline(self):
+        baseline = get_feature_set("wind_baseline")
+        enriched = get_feature_set("wind_enriched")
+        # All baseline columns must be in enriched
+        for col in baseline.columns:
+            assert col in enriched.columns, f"{col} missing from enriched"
+        # Enriched has extra columns
+        assert len(enriched.columns) > len(baseline.columns)
+        assert "wind_speed_cubed" in enriched.columns
+        assert "hour_sin" in enriched.columns
+
+    def test_full_extends_enriched(self):
+        enriched = get_feature_set("wind_enriched")
+        full = get_feature_set("wind_full")
+        for col in enriched.columns:
+            assert col in full.columns, f"{col} missing from full"
+        assert "month_sin" in full.columns
+        assert "dow_sin" in full.columns
+
+    def test_unknown_raises_value_error(self):
+        with pytest.raises(ValueError, match="Unknown feature set"):
+            get_feature_set("nonexistent")
+
+
+class TestListFeatureSets:
+    def test_returns_all_names(self):
+        names = list_feature_sets()
+        assert "wind_baseline" in names
+        assert "wind_enriched" in names
+        assert "wind_full" in names
+        assert len(names) == len(FEATURE_REGISTRY)
+
+
+class TestFeatureSet:
+    def test_is_frozen_dataclass(self):
+        fs = get_feature_set("wind_baseline")
+        assert isinstance(fs, FeatureSet)
+        with pytest.raises(AttributeError):
+            fs.name = "modified"  # type: ignore[misc]
