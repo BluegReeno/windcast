@@ -147,6 +147,119 @@ SOLAR_FULL = FeatureSet(
     description="Solar full: + GHI, wind, full cyclic encoding",
 )
 
+# --- Exogenous-only feature sets (for mlforecast — no lags/rolling) ---
+
+WIND_EXOG_BASELINE = FeatureSet(
+    name="wind_exog_baseline",
+    columns=[
+        "wind_speed_ms",
+        "wind_dir_sin",
+        "wind_dir_cos",
+    ],
+    description="Wind exogenous features for mlforecast (baseline)",
+)
+
+WIND_EXOG_ENRICHED = FeatureSet(
+    name="wind_exog_enriched",
+    columns=[
+        *WIND_EXOG_BASELINE.columns,
+        "wind_speed_cubed",
+        "turbulence_intensity",
+        "wind_dir_sector",
+        "hour_sin",
+        "hour_cos",
+    ],
+    description="Wind exogenous features for mlforecast (enriched)",
+)
+
+WIND_EXOG_FULL = FeatureSet(
+    name="wind_exog_full",
+    columns=[
+        *WIND_EXOG_ENRICHED.columns,
+        "nwp_wind_speed_100m",
+        "nwp_wind_direction_100m",
+        "nwp_temperature_2m",
+        "month_sin",
+        "month_cos",
+        "dow_sin",
+        "dow_cos",
+    ],
+    description="Wind exogenous features for mlforecast (full)",
+)
+
+DEMAND_EXOG_BASELINE = FeatureSet(
+    name="demand_exog_baseline",
+    columns=[
+        "hour_sin",
+        "hour_cos",
+        "dow_sin",
+        "dow_cos",
+        "month_sin",
+        "month_cos",
+    ],
+    description="Demand exogenous features for mlforecast (baseline)",
+)
+
+DEMAND_EXOG_ENRICHED = FeatureSet(
+    name="demand_exog_enriched",
+    columns=[
+        *DEMAND_EXOG_BASELINE.columns,
+        "temperature_c",
+        "heating_degree_days",
+        "cooling_degree_days",
+    ],
+    description="Demand exogenous features for mlforecast (enriched)",
+)
+
+DEMAND_EXOG_FULL = FeatureSet(
+    name="demand_exog_full",
+    columns=[
+        *DEMAND_EXOG_ENRICHED.columns,
+        "wind_speed_ms",
+        "humidity_pct",
+        "price_eur_mwh",
+        "price_lag1",
+        "price_lag24",
+        "is_holiday",
+    ],
+    description="Demand exogenous features for mlforecast (full)",
+)
+
+SOLAR_EXOG_BASELINE = FeatureSet(
+    name="solar_exog_baseline",
+    columns=[
+        "poa_wm2",
+        "hour_sin",
+        "hour_cos",
+    ],
+    description="Solar exogenous features for mlforecast (baseline)",
+)
+
+SOLAR_EXOG_ENRICHED = FeatureSet(
+    name="solar_exog_enriched",
+    columns=[
+        *SOLAR_EXOG_BASELINE.columns,
+        "clearsky_ratio",
+        "ambient_temp_c",
+        "module_temp_c",
+    ],
+    description="Solar exogenous features for mlforecast (enriched)",
+)
+
+SOLAR_EXOG_FULL = FeatureSet(
+    name="solar_exog_full",
+    columns=[
+        *SOLAR_EXOG_ENRICHED.columns,
+        "ghi_wm2",
+        "wind_speed_ms",
+        "month_sin",
+        "month_cos",
+        "dow_sin",
+        "dow_cos",
+    ],
+    description="Solar exogenous features for mlforecast (full)",
+)
+
 FEATURE_REGISTRY: dict[str, FeatureSet] = {
     "wind_baseline": WIND_BASELINE,
     "wind_enriched": WIND_ENRICHED,
@@ -157,6 +270,16 @@ FEATURE_REGISTRY: dict[str, FeatureSet] = {
     "solar_baseline": SOLAR_BASELINE,
     "solar_enriched": SOLAR_ENRICHED,
     "solar_full": SOLAR_FULL,
+    # Exogenous-only (for mlforecast)
+    "wind_exog_baseline": WIND_EXOG_BASELINE,
+    "wind_exog_enriched": WIND_EXOG_ENRICHED,
+    "wind_exog_full": WIND_EXOG_FULL,
+    "demand_exog_baseline": DEMAND_EXOG_BASELINE,
+    "demand_exog_enriched": DEMAND_EXOG_ENRICHED,
+    "demand_exog_full": DEMAND_EXOG_FULL,
+    "solar_exog_baseline": SOLAR_EXOG_BASELINE,
+    "solar_exog_enriched": SOLAR_EXOG_ENRICHED,
+    "solar_exog_full": SOLAR_EXOG_FULL,
 }
 
 

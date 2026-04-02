@@ -18,6 +18,8 @@ dependencies = [
     "scikit-learn>=1.4",
     # Experiment tracking
     "mlflow>=2.10",
+    # Time series forecasting
+    "mlforecast[polars]>=1.0",
     # Hyperparameter tuning
     "optuna>=3.0",
     # Weather data
