@@ -51,6 +51,33 @@ class TestListFeatureSets:
         assert len(names) == len(FEATURE_REGISTRY)
 
 
+class TestDemandFeatureSets:
+    def test_demand_baseline_exists(self):
+        fs = get_feature_set("demand_baseline")
+        assert fs.name == "demand_baseline"
+        assert "load_mw_lag1" in fs.columns
+
+    def test_demand_enriched_extends_baseline(self):
+        baseline = get_feature_set("demand_baseline")
+        enriched = get_feature_set("demand_enriched")
+        for col in baseline.columns:
+            assert col in enriched.columns, f"{col} missing from demand_enriched"
+        assert "heating_degree_days" in enriched.columns
+
+    def test_demand_full_extends_enriched(self):
+        enriched = get_feature_set("demand_enriched")
+        full = get_feature_set("demand_full")
+        for col in enriched.columns:
+            assert col in full.columns, f"{col} missing from demand_full"
+        assert "price_lag1" in full.columns
+
+    def test_list_includes_demand(self):
+        names = list_feature_sets()
+        assert "demand_baseline" in names
+        assert "demand_enriched" in names
+        assert "demand_full" in names
+
+
 class TestFeatureSet:
     def test_is_frozen_dataclass(self):
         fs = get_feature_set("wind_baseline")

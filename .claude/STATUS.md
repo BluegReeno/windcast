@@ -1,8 +1,8 @@
 # EnerCast - Current Status
 
-**Last Updated**: 2026-04-01
+**Last Updated**: 2026-04-02
 **Context**: WeatherNews challenge — demo presentation next week (English, Craig present)
-**Current Phase**: Phase 1 — Wind End-to-End
+**Current Phase**: Phase 2 — Demand Domain DONE
 **Priority**: Wind E2E → Demand domain → Solar (stretch) → Presentation
 
 ---
@@ -13,11 +13,17 @@
 
 ### Priority Order
 
-1. **Phase 1 — Wind End-to-End** - IN PROGRESS
+1. **Phase 1 — Wind End-to-End** - DONE
    - Data ingestion DONE (schema, parser, QC, Open-Meteo)
    - Feature engineering DONE (registry, wind features, build_features CLI)
    - Train + evaluate + MLflow DONE (XGBoost, persistence baseline, evaluation, CLI scripts)
-2. **Phase 2 — Demand Domain** - TODO
+2. **Phase 2 — Demand Domain** - DONE
+   - Demand schema (11-col canonical) DONE
+   - Spain parser (energy + weather CSVs) DONE
+   - Demand QC (load/weather outliers, holidays, DST, gap fill) DONE
+   - Demand features (3 sets: baseline/enriched/full) DONE
+   - Script integration (--domain flag on build_features/train/evaluate) DONE
+   - 148 tests passing, ruff/pyright/pytest all green
 3. **Phase 3 — Solar Domain** - STRETCH
 4. **Phase 4 — Presentation** - TODO
 

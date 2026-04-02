@@ -58,10 +58,58 @@ WIND_FULL = FeatureSet(
     description="Enriched + NWP columns + full cyclic encoding",
 )
 
+DEMAND_BASELINE = FeatureSet(
+    name="demand_baseline",
+    columns=[
+        "load_mw_lag1",
+        "load_mw_lag2",
+        "load_mw_lag24",
+        "load_mw_lag168",
+        "hour_sin",
+        "hour_cos",
+        "dow_sin",
+        "dow_cos",
+        "month_sin",
+        "month_cos",
+    ],
+    description="Demand baseline: load lags (H-1, H-2, D-1, W-1) + calendar cyclic",
+)
+
+DEMAND_ENRICHED = FeatureSet(
+    name="demand_enriched",
+    columns=[
+        *DEMAND_BASELINE.columns,
+        "temperature_c",
+        "heating_degree_days",
+        "cooling_degree_days",
+        "load_mw_roll_mean_24",
+        "load_mw_roll_std_24",
+        "load_mw_roll_mean_168",
+    ],
+    description="Demand enriched: + temperature, HDD/CDD, rolling load stats",
+)
+
+DEMAND_FULL = FeatureSet(
+    name="demand_full",
+    columns=[
+        *DEMAND_ENRICHED.columns,
+        "wind_speed_ms",
+        "humidity_pct",
+        "price_eur_mwh",
+        "price_lag1",
+        "price_lag24",
+        "is_holiday",
+    ],
+    description="Demand full: + wind, humidity, price lags, holiday flag",
+)
+
 FEATURE_REGISTRY: dict[str, FeatureSet] = {
     "wind_baseline": WIND_BASELINE,
     "wind_enriched": WIND_ENRICHED,
     "wind_full": WIND_FULL,
+    "demand_baseline": DEMAND_BASELINE,
+    "demand_enriched": DEMAND_ENRICHED,
+    "demand_full": DEMAND_FULL,
 }
 
 

@@ -2,7 +2,7 @@
 
 Usage:
     uv run python scripts/train.py --turbine-id kwf1 --feature-set wind_baseline
-    uv run python scripts/train.py --turbine-id kwf1 --horizons 1 6 12 24 48
+    uv run python scripts/train.py --domain demand --dataset spain_demand
 """
 
 import argparse
@@ -19,6 +19,11 @@ from windcast.models.xgboost_model import XGBoostConfig, train_xgboost
 from windcast.tracking import log_evaluation_results, log_feature_set, setup_mlflow
 
 logger = logging.getLogger(__name__)
+
+DOMAIN_CONFIG: dict[str, dict[str, str]] = {
+    "wind": {"target": "active_power_kw", "group": "turbine_id", "lag1": "active_power_kw_lag1"},
+    "demand": {"target": "load_mw", "group": "zone_id", "lag1": "load_mw_lag1"},
+}
 
 
 def _temporal_split(
@@ -49,13 +54,14 @@ def _build_horizon_target(
     df: pl.DataFrame,
     horizon: int,
     feature_cols: list[str],
+    target_col_name: str = "active_power_kw",
 ) -> tuple[pl.DataFrame, pl.Series]:
     """Build target for a given horizon and return X, y without nulls.
 
-    Target at row i = active_power_kw at row i+horizon (shift(-h)).
+    Target at row i = target value at row i+horizon (shift(-h)).
     """
     target_col = f"target_h{horizon}"
-    df_h = df.with_columns(pl.col("active_power_kw").shift(-horizon).alias(target_col)).drop_nulls(
+    df_h = df.with_columns(pl.col(target_col_name).shift(-horizon).alias(target_col)).drop_nulls(
         subset=[target_col]
     )
 
@@ -66,7 +72,13 @@ def _build_horizon_target(
 
 def main() -> None:
     """Run training pipeline."""
-    parser = argparse.ArgumentParser(description="Train XGBoost wind power models")
+    parser = argparse.ArgumentParser(description="Train XGBoost forecast models")
+    parser.add_argument(
+        "--domain",
+        choices=["wind", "demand"],
+        default="wind",
+        help="Domain: wind or demand. Default: wind",
+    )
     parser.add_argument(
         "--features-dir",
         type=Path,
@@ -75,15 +87,20 @@ def main() -> None:
     )
     parser.add_argument(
         "--feature-set",
-        default="wind_baseline",
+        default=None,
         choices=list_feature_sets(),
-        help="Feature set to use. Default: wind_baseline",
+        help="Feature set to use. Default: domain-specific baseline",
     )
-    parser.add_argument("--turbine-id", default="kwf1", help="Turbine ID. Default: kwf1")
+    parser.add_argument(
+        "--dataset",
+        default=None,
+        help="Dataset ID for file lookup. Default: domain-specific",
+    )
+    parser.add_argument("--turbine-id", default="kwf1", help="(Wind) Turbine ID. Default: kwf1")
     parser.add_argument(
         "--experiment-name",
-        default="windcast-kelmarsh",
-        help="MLflow experiment name. Default: windcast-kelmarsh",
+        default=None,
+        help="MLflow experiment name. Default: enercast-{dataset}",
     )
     parser.add_argument(
         "--horizons",
@@ -102,10 +119,22 @@ def main() -> None:
     settings = get_settings()
     features_dir = args.features_dir or settings.features_dir
     horizons = args.horizons or settings.forecast_horizons
-    fs = get_feature_set(args.feature_set)
+    domain = args.domain
+    dcfg = DOMAIN_CONFIG[domain]
 
-    # Load feature data
-    parquet_path = features_dir / f"kelmarsh_{args.turbine_id}.parquet"
+    # Domain-specific defaults
+    feature_set = args.feature_set or ("demand_baseline" if domain == "demand" else "wind_baseline")
+    fs = get_feature_set(feature_set)
+
+    dataset = args.dataset or ("spain_demand" if domain == "demand" else "kelmarsh")
+    experiment_name = args.experiment_name or f"enercast-{dataset}"
+
+    # Resolve feature file path
+    if domain == "demand":
+        parquet_path = features_dir / "spain_demand_features.parquet"
+    else:
+        parquet_path = features_dir / f"kelmarsh_{args.turbine_id}.parquet"
+
     if not parquet_path.exists():
         logger.error("Feature file not found: %s", parquet_path)
         return
@@ -133,37 +162,42 @@ def main() -> None:
     # Setup MLflow
     import mlflow
 
-    setup_mlflow(settings.mlflow_tracking_uri, args.experiment_name)
+    setup_mlflow(settings.mlflow_tracking_uri, experiment_name)
 
     config = XGBoostConfig()
+    target_col = dcfg["target"]
+    lag1_col = dcfg["lag1"]
+    run_label = args.turbine_id if domain == "wind" else dataset
 
-    with mlflow.start_run(run_name=f"{args.turbine_id}-{args.feature_set}"):
+    with mlflow.start_run(run_name=f"{run_label}-{feature_set}"):
         # Log experiment-level params
         mlflow.log_params(
             {
-                "turbine_id": args.turbine_id,
-                "dataset": "kelmarsh",
+                "domain": domain,
+                "dataset": dataset,
                 "horizons": str(horizons),
                 "n_train": len(train_df),
                 "n_val": len(val_df),
                 "n_test": len(test_df),
             }
         )
-        log_feature_set(args.feature_set, available_cols)
+        if domain == "wind":
+            mlflow.log_param("turbine_id", args.turbine_id)
+        log_feature_set(feature_set, available_cols)
 
         # Train per horizon
         for h in horizons:
-            logger.info("=== Horizon h=%d (%d min) ===", h, h * 10)
+            logger.info("=== Horizon h=%d ===", h)
 
-            X_train, y_train = _build_horizon_target(train_df, h, available_cols)
-            X_val, y_val = _build_horizon_target(val_df, h, available_cols)
+            X_train, y_train = _build_horizon_target(train_df, h, available_cols, target_col)
+            X_val, y_val = _build_horizon_target(val_df, h, available_cols, target_col)
 
             if len(X_train) == 0 or len(X_val) == 0:
                 logger.warning("Insufficient data for horizon %d, skipping", h)
                 continue
 
-            with mlflow.start_run(run_name=f"h{h:02d}-{h * 10}min", nested=True):
-                mlflow.log_params({"horizon_steps": h, "horizon_minutes": h * 10})
+            with mlflow.start_run(run_name=f"h{h:02d}", nested=True):
+                mlflow.log_params({"horizon_steps": h})
 
                 # Train XGBoost
                 model = train_xgboost(X_train, y_train, X_val, y_val, config)
@@ -172,7 +206,6 @@ def main() -> None:
                 y_pred = model.predict(X_val)
 
                 # Persistence baseline (lag1 column)
-                lag1_col = "active_power_kw_lag1"
                 if lag1_col in X_val.columns:
                     y_persistence = X_val.get_column(lag1_col).to_numpy()
                     metrics = compute_metrics(y_val.to_numpy(), y_pred, y_persistence=y_persistence)

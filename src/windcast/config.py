@@ -49,10 +49,32 @@ PENMANSHIEL = DatasetConfig(
     longitude=-2.29,
 )
 
-DATASETS: dict[str, DatasetConfig] = {
+
+class DemandDatasetConfig(BaseModel):
+    """Per-dataset metadata for demand forecasting."""
+
+    dataset_id: str
+    zone_id: str
+    population: int | None = None
+    latitude: float
+    longitude: float
+    timezone: str
+
+
+SPAIN_DEMAND = DemandDatasetConfig(
+    dataset_id="spain_demand",
+    zone_id="ES",
+    population=47_000_000,
+    latitude=40.4168,
+    longitude=-3.7038,
+    timezone="Europe/Madrid",
+)
+
+DATASETS: dict[str, DatasetConfig | DemandDatasetConfig] = {
     "kelmarsh": KELMARSH,
     "hill_of_towie": HILL_OF_TOWIE,
     "penmanshiel": PENMANSHIEL,
+    "spain_demand": SPAIN_DEMAND,
 }
 
 
@@ -66,6 +88,17 @@ class QCConfig(BaseModel):
     min_pitch_curtailment_deg: float = 3.0
 
 
+class DemandQCConfig(BaseModel):
+    """QC thresholds for demand data."""
+
+    max_load_mw: float = 50_000.0
+    min_load_mw: float = 10_000.0
+    max_temperature_c: float = 50.0
+    min_temperature_c: float = -20.0
+    max_wind_speed_ms: float = 50.0
+    max_gap_fill_hours: int = 3
+
+
 class WindCastSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="WINDCAST_",
@@ -76,11 +109,13 @@ class WindCastSettings(BaseSettings):
 
     data_dir: Path = Path("data")
     dataset_id: str = "kelmarsh"
+    domain: str = "wind"
     train_years: int = 5
     val_years: int = 1
     test_years: int = 1
     forecast_horizons: list[int] = [1, 6, 12, 24, 48]
     qc: QCConfig = Field(default_factory=QCConfig)
+    demand_qc: DemandQCConfig = Field(default_factory=DemandQCConfig)
     mlflow_tracking_uri: str = "file:./mlruns"
 
     @property
@@ -96,7 +131,7 @@ class WindCastSettings(BaseSettings):
         return self.data_dir / "features"
 
     @property
-    def dataset_config(self) -> DatasetConfig:
+    def dataset_config(self) -> DatasetConfig | DemandDatasetConfig:
         return DATASETS[self.dataset_id]
 
 

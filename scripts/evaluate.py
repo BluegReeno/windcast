@@ -2,7 +2,7 @@
 
 Usage:
     uv run python scripts/evaluate.py --turbine-id kwf1 --feature-set wind_baseline
-    uv run python scripts/evaluate.py --turbine-id kwf1 --run-id <mlflow-run-id>
+    uv run python scripts/evaluate.py --domain demand --dataset spain_demand
 """
 
 import argparse
@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 
 import mlflow
+import numpy as np
 import polars as pl
 import xgboost as xgb
 
@@ -19,6 +20,39 @@ from windcast.models.evaluation import compute_metrics, regime_analysis
 from windcast.tracking import log_dataframe_artifact, log_evaluation_results, setup_mlflow
 
 logger = logging.getLogger(__name__)
+
+DOMAIN_CONFIG: dict[str, dict[str, str]] = {
+    "wind": {"target": "active_power_kw", "group": "turbine_id", "lag1": "active_power_kw_lag1"},
+    "demand": {"target": "load_mw", "group": "zone_id", "lag1": "load_mw_lag1"},
+}
+
+
+def _demand_regime_analysis(
+    test_h: pl.DataFrame,
+    target_col: str,
+    pred_col: str,
+) -> dict[str, dict[str, float]]:
+    """Time-of-day regime analysis for demand domain."""
+    regimes: dict[str, dict[str, float]] = {}
+    hour = test_h.get_column("timestamp_utc").dt.hour()
+
+    regime_map = {
+        "off_peak": (hour >= 0) & (hour < 8),
+        "shoulder": (hour >= 8) & (hour < 18),
+        "peak": (hour >= 18) & (hour <= 23),
+    }
+
+    for name, mask in regime_map.items():
+        subset = test_h.filter(mask)
+        if len(subset) == 0:
+            continue
+        y_true = subset.get_column(target_col).to_numpy()
+        y_pred = subset.get_column(pred_col).to_numpy()
+        mae = float(np.mean(np.abs(y_true - y_pred)))
+        rmse = float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
+        regimes[name] = {"mae": mae, "rmse": rmse, "n_samples": float(len(subset))}
+
+    return regimes
 
 
 def _temporal_split(
@@ -88,7 +122,13 @@ def _find_latest_run(experiment_name: str) -> str | None:
 
 def main() -> None:
     """Run evaluation pipeline."""
-    parser = argparse.ArgumentParser(description="Evaluate wind power forecast models")
+    parser = argparse.ArgumentParser(description="Evaluate forecast models")
+    parser.add_argument(
+        "--domain",
+        choices=["wind", "demand"],
+        default="wind",
+        help="Domain: wind or demand. Default: wind",
+    )
     parser.add_argument(
         "--features-dir",
         type=Path,
@@ -97,15 +137,20 @@ def main() -> None:
     )
     parser.add_argument(
         "--feature-set",
-        default="wind_baseline",
+        default=None,
         choices=list_feature_sets(),
-        help="Feature set. Default: wind_baseline",
+        help="Feature set. Default: domain-specific baseline",
     )
-    parser.add_argument("--turbine-id", default="kwf1", help="Turbine ID. Default: kwf1")
+    parser.add_argument(
+        "--dataset",
+        default=None,
+        help="Dataset ID. Default: domain-specific",
+    )
+    parser.add_argument("--turbine-id", default="kwf1", help="(Wind) Turbine ID. Default: kwf1")
     parser.add_argument(
         "--experiment-name",
-        default="windcast-kelmarsh",
-        help="MLflow experiment name. Default: windcast-kelmarsh",
+        default=None,
+        help="MLflow experiment name. Default: enercast-{dataset}",
     )
     parser.add_argument("--run-id", default=None, help="MLflow run ID to evaluate. Default: latest")
     args = parser.parse_args()
@@ -117,15 +162,22 @@ def main() -> None:
 
     settings = get_settings()
     features_dir = args.features_dir or settings.features_dir
-    fs = get_feature_set(args.feature_set)
+    domain = args.domain
+    dcfg = DOMAIN_CONFIG[domain]
+
+    feature_set = args.feature_set or ("demand_baseline" if domain == "demand" else "wind_baseline")
+    fs = get_feature_set(feature_set)
+
+    dataset = args.dataset or ("spain_demand" if domain == "demand" else "kelmarsh")
+    experiment_name = args.experiment_name or f"enercast-{dataset}"
 
     # Setup MLflow
-    setup_mlflow(settings.mlflow_tracking_uri, args.experiment_name)
+    setup_mlflow(settings.mlflow_tracking_uri, experiment_name)
 
     # Find run to evaluate
-    run_id = args.run_id or _find_latest_run(args.experiment_name)
+    run_id = args.run_id or _find_latest_run(experiment_name)
     if run_id is None:
-        logger.error("No MLflow runs found for experiment %s", args.experiment_name)
+        logger.error("No MLflow runs found for experiment %s", experiment_name)
         return
 
     logger.info("Evaluating run: %s", run_id)
@@ -138,7 +190,11 @@ def main() -> None:
     logger.info("Loaded %d horizon models: %s", len(models), sorted(models.keys()))
 
     # Load test data
-    parquet_path = features_dir / f"kelmarsh_{args.turbine_id}.parquet"
+    if domain == "demand":
+        parquet_path = features_dir / "spain_demand_features.parquet"
+    else:
+        parquet_path = features_dir / f"kelmarsh_{args.turbine_id}.parquet"
+
     if not parquet_path.exists():
         logger.error("Feature file not found: %s", parquet_path)
         return
@@ -154,24 +210,31 @@ def main() -> None:
         logger.error("No test data available")
         return
 
+    target_col_name = dcfg["target"]
+    lag1_col = dcfg["lag1"]
+    run_label = args.turbine_id if domain == "wind" else dataset
+
     # Evaluate per horizon
     all_results: list[dict[str, float | int]] = []
 
-    with mlflow.start_run(run_name=f"eval-{args.turbine_id}"):
+    with mlflow.start_run(run_name=f"eval-{run_label}"):
         mlflow.log_params(
             {
                 "eval_run_id": run_id,
-                "turbine_id": args.turbine_id,
-                "feature_set": args.feature_set,
+                "domain": domain,
+                "dataset": dataset,
+                "feature_set": feature_set,
                 "n_test": len(test_df),
             }
         )
+        if domain == "wind":
+            mlflow.log_param("turbine_id", args.turbine_id)
 
         for h in sorted(models.keys()):
             # Build target
             target_col = f"target_h{h}"
             test_h = test_df.with_columns(
-                pl.col("active_power_kw").shift(-h).alias(target_col)
+                pl.col(target_col_name).shift(-h).alias(target_col)
             ).drop_nulls(subset=[target_col])
 
             if len(test_h) == 0:
@@ -185,7 +248,6 @@ def main() -> None:
             y_pred = models[h].predict(X_test)
 
             # Persistence baseline
-            lag1_col = "active_power_kw_lag1"
             y_persistence = (
                 X_test.get_column(lag1_col).to_numpy() if lag1_col in X_test.columns else None
             )
@@ -195,15 +257,21 @@ def main() -> None:
             with mlflow.start_run(run_name=f"eval-h{h:02d}", nested=True):
                 log_evaluation_results(metrics, horizon=h)
 
-                # Regime analysis
-                if "wind_speed_ms" in test_h.columns:
-                    pred_col = f"y_pred_h{h}"
-                    regime_df = test_h.with_columns(pl.Series(name=pred_col, values=y_pred))
+                # Domain-specific regime analysis
+                pred_col = f"y_pred_h{h}"
+                regime_df = test_h.with_columns(pl.Series(name=pred_col, values=y_pred))
+
+                if domain == "wind" and "wind_speed_ms" in test_h.columns:
                     regimes = regime_analysis(regime_df, target_col, pred_col)
-                    for regime_name, regime_metrics in regimes.items():
-                        mlflow.log_metrics(
-                            {f"regime_{regime_name}_{k}": v for k, v in regime_metrics.items()}
-                        )
+                elif domain == "demand" and "timestamp_utc" in test_h.columns:
+                    regimes = _demand_regime_analysis(regime_df, target_col, pred_col)
+                else:
+                    regimes = {}
+
+                for regime_name, regime_metrics in regimes.items():
+                    mlflow.log_metrics(
+                        {f"regime_{regime_name}_{k}": v for k, v in regime_metrics.items()}
+                    )
 
             result_row: dict[str, float | int] = {"horizon": h, **metrics}
             all_results.append(result_row)

@@ -1,8 +1,8 @@
-"""Build wind features from processed SCADA Parquet files.
+"""Build features from processed Parquet files.
 
 Usage:
     uv run python scripts/build_features.py [--feature-set wind_baseline]
-    uv run python scripts/build_features.py --feature-set wind_enriched --turbine-id kwf1
+    uv run python scripts/build_features.py --domain demand --feature-set demand_baseline
 """
 
 import argparse
@@ -12,14 +12,20 @@ from pathlib import Path
 import polars as pl
 
 from windcast.config import get_settings
-from windcast.features import build_wind_features, list_feature_sets
+from windcast.features import build_demand_features, build_wind_features, list_feature_sets
 
 logger = logging.getLogger(__name__)
 
 
 def main() -> None:
     """Run feature building pipeline."""
-    parser = argparse.ArgumentParser(description="Build wind features from SCADA Parquet")
+    parser = argparse.ArgumentParser(description="Build features from processed Parquet")
+    parser.add_argument(
+        "--domain",
+        choices=["wind", "demand"],
+        default="wind",
+        help="Domain: wind or demand. Default: wind",
+    )
     parser.add_argument(
         "--input-dir",
         type=Path,
@@ -34,14 +40,14 @@ def main() -> None:
     )
     parser.add_argument(
         "--feature-set",
-        default="wind_baseline",
+        default=None,
         choices=list_feature_sets(),
-        help="Feature set to build. Default: wind_baseline",
+        help="Feature set to build. Default: domain-specific baseline",
     )
     parser.add_argument(
         "--turbine-id",
         default=None,
-        help="Process only this turbine (e.g., kwf1). Default: all turbines.",
+        help="(Wind only) Process only this turbine (e.g., kwf1). Default: all turbines.",
     )
     args = parser.parse_args()
 
@@ -54,8 +60,20 @@ def main() -> None:
     input_dir = args.input_dir or settings.processed_dir
     output_dir = args.output_dir or settings.features_dir
 
+    # Domain-specific defaults
+    if args.feature_set is None:
+        feature_set = "demand_baseline" if args.domain == "demand" else "wind_baseline"
+    else:
+        feature_set = args.feature_set
+
     # Find Parquet files
-    pattern = f"kelmarsh_{args.turbine_id}.parquet" if args.turbine_id else "kelmarsh_*.parquet"
+    if args.domain == "demand":
+        pattern = "spain_demand.parquet"
+    elif args.turbine_id:
+        pattern = f"kelmarsh_{args.turbine_id}.parquet"
+    else:
+        pattern = "kelmarsh_*.parquet"
+
     parquet_files = sorted(input_dir.glob(pattern))
     if not parquet_files:
         logger.error("No Parquet files found in %s matching %s", input_dir, pattern)
@@ -69,13 +87,21 @@ def main() -> None:
         df = pl.read_parquet(pq_file)
         rows_in = len(df)
 
-        df = build_wind_features(df, feature_set=args.feature_set)
+        if args.domain == "demand":
+            df = build_demand_features(df, feature_set=feature_set)
+        else:
+            df = build_wind_features(df, feature_set=feature_set)
 
         # Drop rows with nulls in feature columns (from lags/rolling at series start)
         df = df.drop_nulls()
         rows_out = len(df)
 
-        output_path = output_dir / pq_file.name
+        # Name output: use input name but replace .parquet with _features.parquet for demand
+        if args.domain == "demand":
+            output_path = output_dir / "spain_demand_features.parquet"
+        else:
+            output_path = output_dir / pq_file.name
+
         df.write_parquet(output_path, compression="zstd", compression_level=3, statistics=True)
         logger.info(
             "Wrote %s: %d -> %d rows (%d features), %.1f MB",
@@ -86,7 +112,7 @@ def main() -> None:
             output_path.stat().st_size / 1024 / 1024,
         )
 
-    logger.info("Done! Feature set: %s, output: %s", args.feature_set, output_dir)
+    logger.info("Done! Feature set: %s, output: %s", feature_set, output_dir)
 
 
 if __name__ == "__main__":
