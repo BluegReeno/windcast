@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 DOMAIN_CONFIG: dict[str, dict[str, str]] = {
     "wind": {"target": "active_power_kw", "group": "turbine_id", "lag1": "active_power_kw_lag1"},
     "demand": {"target": "load_mw", "group": "zone_id", "lag1": "load_mw_lag1"},
+    "solar": {"target": "power_kw", "group": "system_id", "lag1": "power_kw_lag1"},
 }
 
 
@@ -40,6 +41,37 @@ def _demand_regime_analysis(
         "off_peak": (hour >= 0) & (hour < 8),
         "shoulder": (hour >= 8) & (hour < 18),
         "peak": (hour >= 18) & (hour <= 23),
+    }
+
+    for name, mask in regime_map.items():
+        subset = test_h.filter(mask)
+        if len(subset) == 0:
+            continue
+        y_true = subset.get_column(target_col).to_numpy()
+        y_pred = subset.get_column(pred_col).to_numpy()
+        mae = float(np.mean(np.abs(y_true - y_pred)))
+        rmse = float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
+        regimes[name] = {"mae": mae, "rmse": rmse, "n_samples": float(len(subset))}
+
+    return regimes
+
+
+def _solar_regime_analysis(
+    test_h: pl.DataFrame,
+    target_col: str,
+    pred_col: str,
+) -> dict[str, dict[str, float]]:
+    """Irradiance-level regime analysis for solar domain."""
+    regimes: dict[str, dict[str, float]] = {}
+
+    if "poa_wm2" not in test_h.columns:
+        return regimes
+
+    poa = test_h.get_column("poa_wm2")
+    regime_map = {
+        "low_irradiance": (poa >= 0) & (poa < 200),
+        "medium_irradiance": (poa >= 200) & (poa < 600),
+        "high_irradiance": (poa >= 600),
     }
 
     for name, mask in regime_map.items():
@@ -125,9 +157,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate forecast models")
     parser.add_argument(
         "--domain",
-        choices=["wind", "demand"],
+        choices=["wind", "demand", "solar"],
         default="wind",
-        help="Domain: wind or demand. Default: wind",
+        help="Domain: wind, demand, or solar. Default: wind",
     )
     parser.add_argument(
         "--features-dir",
@@ -165,10 +197,20 @@ def main() -> None:
     domain = args.domain
     dcfg = DOMAIN_CONFIG[domain]
 
-    feature_set = args.feature_set or ("demand_baseline" if domain == "demand" else "wind_baseline")
+    domain_feature_defaults = {
+        "wind": "wind_baseline",
+        "demand": "demand_baseline",
+        "solar": "solar_baseline",
+    }
+    feature_set = args.feature_set or domain_feature_defaults[domain]
     fs = get_feature_set(feature_set)
 
-    dataset = args.dataset or ("spain_demand" if domain == "demand" else "kelmarsh")
+    domain_dataset_defaults = {
+        "wind": "kelmarsh",
+        "demand": "spain_demand",
+        "solar": "pvdaq_system4",
+    }
+    dataset = args.dataset or domain_dataset_defaults[domain]
     experiment_name = args.experiment_name or f"enercast-{dataset}"
 
     # Setup MLflow
@@ -192,6 +234,8 @@ def main() -> None:
     # Load test data
     if domain == "demand":
         parquet_path = features_dir / "spain_demand_features.parquet"
+    elif domain == "solar":
+        parquet_path = features_dir / "pvdaq_system4_features.parquet"
     else:
         parquet_path = features_dir / f"kelmarsh_{args.turbine_id}.parquet"
 
@@ -265,6 +309,8 @@ def main() -> None:
                     regimes = regime_analysis(regime_df, target_col, pred_col)
                 elif domain == "demand" and "timestamp_utc" in test_h.columns:
                     regimes = _demand_regime_analysis(regime_df, target_col, pred_col)
+                elif domain == "solar":
+                    regimes = _solar_regime_analysis(regime_df, target_col, pred_col)
                 else:
                     regimes = {}
 

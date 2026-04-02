@@ -70,11 +70,37 @@ SPAIN_DEMAND = DemandDatasetConfig(
     timezone="Europe/Madrid",
 )
 
-DATASETS: dict[str, DatasetConfig | DemandDatasetConfig] = {
+
+class SolarDatasetConfig(BaseModel):
+    """Per-dataset metadata for solar PV forecasting."""
+
+    dataset_id: str
+    system_id: str
+    capacity_kw: float
+    tilt_deg: float
+    azimuth_deg: float
+    latitude: float
+    longitude: float
+    timezone: str
+
+
+PVDAQ_SYSTEM4 = SolarDatasetConfig(
+    dataset_id="pvdaq_system4",
+    system_id="4",
+    capacity_kw=2.2,
+    tilt_deg=40.0,
+    azimuth_deg=180.0,
+    latitude=39.7407,
+    longitude=-105.1686,
+    timezone="America/Denver",
+)
+
+DATASETS: dict[str, DatasetConfig | DemandDatasetConfig | SolarDatasetConfig] = {
     "kelmarsh": KELMARSH,
     "hill_of_towie": HILL_OF_TOWIE,
     "penmanshiel": PENMANSHIEL,
     "spain_demand": SPAIN_DEMAND,
+    "pvdaq_system4": PVDAQ_SYSTEM4,
 }
 
 
@@ -99,6 +125,18 @@ class DemandQCConfig(BaseModel):
     max_gap_fill_hours: int = 3
 
 
+class SolarQCConfig(BaseModel):
+    """QC thresholds for solar data."""
+
+    max_power_kw: float = 5.0
+    max_irradiance_wm2: float = 1500.0
+    min_irradiance_wm2: float = -10.0
+    max_temperature_c: float = 60.0
+    min_temperature_c: float = -30.0
+    max_gap_fill_intervals: int = 4
+    nighttime_power_threshold_kw: float = 0.01
+
+
 class WindCastSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="WINDCAST_",
@@ -116,6 +154,7 @@ class WindCastSettings(BaseSettings):
     forecast_horizons: list[int] = [1, 6, 12, 24, 48]
     qc: QCConfig = Field(default_factory=QCConfig)
     demand_qc: DemandQCConfig = Field(default_factory=DemandQCConfig)
+    solar_qc: SolarQCConfig = Field(default_factory=SolarQCConfig)
     mlflow_tracking_uri: str = "file:./mlruns"
 
     @property
@@ -131,7 +170,7 @@ class WindCastSettings(BaseSettings):
         return self.data_dir / "features"
 
     @property
-    def dataset_config(self) -> DatasetConfig | DemandDatasetConfig:
+    def dataset_config(self) -> DatasetConfig | DemandDatasetConfig | SolarDatasetConfig:
         return DATASETS[self.dataset_id]
 
 

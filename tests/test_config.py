@@ -1,6 +1,6 @@
 """Tests for windcast.config module."""
 
-from windcast.config import DATASETS, DemandQCConfig, WindCastSettings, get_settings
+from windcast.config import DATASETS, DemandQCConfig, SolarQCConfig, WindCastSettings, get_settings
 
 
 def test_default_settings():
@@ -70,3 +70,26 @@ def test_domain_env_override(monkeypatch):
     monkeypatch.setenv("WINDCAST_DOMAIN", "demand")
     settings = WindCastSettings()
     assert settings.domain == "demand"
+
+
+def test_pvdaq_system4_in_datasets():
+    """PVDAQ System 4 solar dataset is registered."""
+    assert "pvdaq_system4" in DATASETS
+    cfg = DATASETS["pvdaq_system4"]
+    assert cfg.dataset_id == "pvdaq_system4"
+
+
+def test_solar_qc_defaults():
+    """SolarQCConfig has sensible defaults."""
+    qc = SolarQCConfig()
+    assert qc.max_power_kw == 5.0
+    assert qc.max_irradiance_wm2 == 1500.0
+    assert qc.max_gap_fill_intervals == 4
+
+
+def test_solar_dataset_config_fields():
+    """Solar dataset config has correct values."""
+    cfg = DATASETS["pvdaq_system4"]
+    assert hasattr(cfg, "system_id")
+    assert cfg.latitude > 39.0  # type: ignore[union-attr]
+    assert hasattr(cfg, "capacity_kw")

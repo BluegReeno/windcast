@@ -103,6 +103,50 @@ DEMAND_FULL = FeatureSet(
     description="Demand full: + wind, humidity, price lags, holiday flag",
 )
 
+SOLAR_BASELINE = FeatureSet(
+    name="solar_baseline",
+    columns=[
+        "poa_wm2",
+        "power_kw_lag1",
+        "power_kw_lag2",
+        "power_kw_lag4",
+        "power_kw_lag8",
+        "power_kw_lag96",
+        "hour_sin",
+        "hour_cos",
+    ],
+    description="Solar baseline: POA irradiance + power lags + hour cyclic",
+)
+
+SOLAR_ENRICHED = FeatureSet(
+    name="solar_enriched",
+    columns=[
+        *SOLAR_BASELINE.columns,
+        "clearsky_ratio",
+        "ambient_temp_c",
+        "module_temp_c",
+        "power_kw_roll_mean_4",
+        "power_kw_roll_mean_16",
+        "power_kw_roll_mean_96",
+        "power_kw_roll_std_4",
+    ],
+    description="Solar enriched: + clearsky ratio, temperature, rolling power stats",
+)
+
+SOLAR_FULL = FeatureSet(
+    name="solar_full",
+    columns=[
+        *SOLAR_ENRICHED.columns,
+        "ghi_wm2",
+        "wind_speed_ms",
+        "month_sin",
+        "month_cos",
+        "dow_sin",
+        "dow_cos",
+    ],
+    description="Solar full: + GHI, wind, full cyclic encoding",
+)
+
 FEATURE_REGISTRY: dict[str, FeatureSet] = {
     "wind_baseline": WIND_BASELINE,
     "wind_enriched": WIND_ENRICHED,
@@ -110,6 +154,9 @@ FEATURE_REGISTRY: dict[str, FeatureSet] = {
     "demand_baseline": DEMAND_BASELINE,
     "demand_enriched": DEMAND_ENRICHED,
     "demand_full": DEMAND_FULL,
+    "solar_baseline": SOLAR_BASELINE,
+    "solar_enriched": SOLAR_ENRICHED,
+    "solar_full": SOLAR_FULL,
 }
 
 

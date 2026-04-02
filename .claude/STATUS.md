@@ -2,7 +2,7 @@
 
 **Last Updated**: 2026-04-02
 **Context**: WeatherNews challenge — demo presentation next week (English, Craig present)
-**Current Phase**: Phase 2 — Demand Domain DONE
+**Current Phase**: Phase 3 — Solar Domain DONE
 **Priority**: Wind E2E → Demand domain → Solar (stretch) → Presentation
 
 ---
@@ -23,8 +23,14 @@
    - Demand QC (load/weather outliers, holidays, DST, gap fill) DONE
    - Demand features (3 sets: baseline/enriched/full) DONE
    - Script integration (--domain flag on build_features/train/evaluate) DONE
-   - 148 tests passing, ruff/pyright/pytest all green
-3. **Phase 3 — Solar Domain** - STRETCH
+   - Tests passing, ruff/pyright/pytest all green
+3. **Phase 3 — Solar Domain** - DONE
+   - Solar schema (10-col canonical) DONE
+   - PVDAQ System 4 parser (CSV → canonical, 1-min → 15-min aggregation) DONE
+   - Solar QC (nighttime power, irradiance/temp outliers, power-irradiance consistency, gap fill) DONE
+   - Solar features (3 sets: baseline/enriched/full) DONE
+   - Script integration (--domain solar on build_features/train/evaluate) DONE
+   - 201 tests passing, ruff/pyright/pytest all green
 4. **Phase 4 — Presentation** - TODO
 
 ---
@@ -73,11 +79,13 @@
 - [x] Same train.py + evaluate.py work with `--domain demand`
 - [x] Tests
 
-### Phase 3: Solar Domain (Day 3-4, stretch)
-- [ ] Solar schema
-- [ ] PVDAQ parser
-- [ ] Solar feature sets
-- [ ] Same pipeline, 3 domains in MLflow
+### Phase 3: Solar Domain (DONE)
+- [x] Solar schema (10-col canonical)
+- [x] PVDAQ System 4 parser (CSV → canonical, 1-min → 15-min aggregation, UTC conversion)
+- [x] Solar QC pipeline (6 rules: nighttime power, power/irradiance/temp outliers, consistency, gap fill)
+- [x] Solar feature sets (baseline/enriched/full) registered in feature registry
+- [x] Script integration (ingest_pvdaq.py + --domain solar on build_features/train/evaluate)
+- [x] Tests (53 new tests, 201 total)
 
 ### Phase 4: Presentation (Day 5)
 - [ ] Slide deck (English): "I understood / Here's proof / Here's the roadmap"
@@ -134,4 +142,4 @@ mlflow ui                                      # View results
 
 ---
 
-**Next Action**: Phase 3 — Solar domain (PVDAQ) or Phase 4 — Presentation prep
+**Next Action**: Phase 4 — Presentation prep (slide deck, live demo script, WN roadmap)

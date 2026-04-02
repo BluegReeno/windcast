@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 DOMAIN_CONFIG: dict[str, dict[str, str]] = {
     "wind": {"target": "active_power_kw", "group": "turbine_id", "lag1": "active_power_kw_lag1"},
     "demand": {"target": "load_mw", "group": "zone_id", "lag1": "load_mw_lag1"},
+    "solar": {"target": "power_kw", "group": "system_id", "lag1": "power_kw_lag1"},
 }
 
 
@@ -75,9 +76,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Train XGBoost forecast models")
     parser.add_argument(
         "--domain",
-        choices=["wind", "demand"],
+        choices=["wind", "demand", "solar"],
         default="wind",
-        help="Domain: wind or demand. Default: wind",
+        help="Domain: wind, demand, or solar. Default: wind",
     )
     parser.add_argument(
         "--features-dir",
@@ -123,15 +124,27 @@ def main() -> None:
     dcfg = DOMAIN_CONFIG[domain]
 
     # Domain-specific defaults
-    feature_set = args.feature_set or ("demand_baseline" if domain == "demand" else "wind_baseline")
+    domain_feature_defaults = {
+        "wind": "wind_baseline",
+        "demand": "demand_baseline",
+        "solar": "solar_baseline",
+    }
+    feature_set = args.feature_set or domain_feature_defaults[domain]
     fs = get_feature_set(feature_set)
 
-    dataset = args.dataset or ("spain_demand" if domain == "demand" else "kelmarsh")
+    domain_dataset_defaults = {
+        "wind": "kelmarsh",
+        "demand": "spain_demand",
+        "solar": "pvdaq_system4",
+    }
+    dataset = args.dataset or domain_dataset_defaults[domain]
     experiment_name = args.experiment_name or f"enercast-{dataset}"
 
     # Resolve feature file path
     if domain == "demand":
         parquet_path = features_dir / "spain_demand_features.parquet"
+    elif domain == "solar":
+        parquet_path = features_dir / "pvdaq_system4_features.parquet"
     else:
         parquet_path = features_dir / f"kelmarsh_{args.turbine_id}.parquet"
 

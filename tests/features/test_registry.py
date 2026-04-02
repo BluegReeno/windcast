@@ -78,6 +78,35 @@ class TestDemandFeatureSets:
         assert "demand_full" in names
 
 
+class TestSolarFeatureSets:
+    def test_solar_baseline_exists(self):
+        fs = get_feature_set("solar_baseline")
+        assert fs.name == "solar_baseline"
+        assert "poa_wm2" in fs.columns
+        assert "power_kw_lag1" in fs.columns
+
+    def test_solar_enriched_extends_baseline(self):
+        baseline = get_feature_set("solar_baseline")
+        enriched = get_feature_set("solar_enriched")
+        for col in baseline.columns:
+            assert col in enriched.columns, f"{col} missing from solar_enriched"
+        assert "clearsky_ratio" in enriched.columns
+
+    def test_solar_full_extends_enriched(self):
+        enriched = get_feature_set("solar_enriched")
+        full = get_feature_set("solar_full")
+        for col in enriched.columns:
+            assert col in full.columns, f"{col} missing from solar_full"
+        assert "month_sin" in full.columns
+        assert "dow_sin" in full.columns
+
+    def test_list_includes_solar(self):
+        names = list_feature_sets()
+        assert "solar_baseline" in names
+        assert "solar_enriched" in names
+        assert "solar_full" in names
+
+
 class TestFeatureSet:
     def test_is_frozen_dataclass(self):
         fs = get_feature_set("wind_baseline")

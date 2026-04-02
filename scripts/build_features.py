@@ -12,7 +12,12 @@ from pathlib import Path
 import polars as pl
 
 from windcast.config import get_settings
-from windcast.features import build_demand_features, build_wind_features, list_feature_sets
+from windcast.features import (
+    build_demand_features,
+    build_solar_features,
+    build_wind_features,
+    list_feature_sets,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +27,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Build features from processed Parquet")
     parser.add_argument(
         "--domain",
-        choices=["wind", "demand"],
+        choices=["wind", "demand", "solar"],
         default="wind",
         help="Domain: wind or demand. Default: wind",
     )
@@ -62,13 +67,20 @@ def main() -> None:
 
     # Domain-specific defaults
     if args.feature_set is None:
-        feature_set = "demand_baseline" if args.domain == "demand" else "wind_baseline"
+        domain_defaults = {
+            "wind": "wind_baseline",
+            "demand": "demand_baseline",
+            "solar": "solar_baseline",
+        }
+        feature_set = domain_defaults[args.domain]
     else:
         feature_set = args.feature_set
 
     # Find Parquet files
     if args.domain == "demand":
         pattern = "spain_demand.parquet"
+    elif args.domain == "solar":
+        pattern = "pvdaq_system4.parquet"
     elif args.turbine_id:
         pattern = f"kelmarsh_{args.turbine_id}.parquet"
     else:
@@ -89,6 +101,8 @@ def main() -> None:
 
         if args.domain == "demand":
             df = build_demand_features(df, feature_set=feature_set)
+        elif args.domain == "solar":
+            df = build_solar_features(df, feature_set=feature_set)
         else:
             df = build_wind_features(df, feature_set=feature_set)
 
@@ -99,6 +113,8 @@ def main() -> None:
         # Name output: use input name but replace .parquet with _features.parquet for demand
         if args.domain == "demand":
             output_path = output_dir / "spain_demand_features.parquet"
+        elif args.domain == "solar":
+            output_path = output_dir / "pvdaq_system4_features.parquet"
         else:
             output_path = output_dir / pq_file.name
 
