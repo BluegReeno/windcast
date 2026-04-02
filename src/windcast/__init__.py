@@ -1,1 +1,1 @@
-"""WindCast — ML framework for wind power forecasting."""
+"""EnerCast — ML framework for energy engineering professionals."""

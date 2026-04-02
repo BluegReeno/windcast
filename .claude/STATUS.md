@@ -63,15 +63,15 @@
 - [x] `scripts/evaluate.py` — Evaluation CLI
 - [x] 39 new tests (89 total), ruff, pyright, pytest all green
 
-### Phase 2: Demand Domain (Day 2-3)
-- [ ] Demand schema (timestamp, load_mw, temperature, price, calendar)
-- [ ] Spain demand parser (Kaggle CSV → canonical schema)
-- [ ] Demand QC rules
-- [ ] Demand feature sets (lags H-1/D-1/W-1, calendar, temperature)
-- [ ] Demand dataset config
-- [ ] `scripts/ingest_spain_demand.py`
-- [ ] Same train.py + evaluate.py work with `--domain demand`
-- [ ] Tests
+### Phase 2: Demand Domain (DONE)
+- [x] Demand schema (timestamp, load_mw, temperature, price, calendar)
+- [x] Spain demand parser (Kaggle CSV → canonical schema)
+- [x] Demand QC rules
+- [x] Demand feature sets (lags H-1/D-1/W-1, calendar, temperature)
+- [x] Demand dataset config
+- [x] `scripts/ingest_spain_demand.py`
+- [x] Same train.py + evaluate.py work with `--domain demand`
+- [x] Tests
 
 ### Phase 3: Solar Domain (Day 3-4, stretch)
 - [ ] Solar schema
@@ -134,4 +134,4 @@ mlflow ui                                      # View results
 
 ---
 
-**Next Action**: Build Phase 1.3 — Wind features + train + evaluate + MLflow
+**Next Action**: Phase 3 — Solar domain (PVDAQ) or Phase 4 — Presentation prep

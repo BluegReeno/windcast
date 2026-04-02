@@ -1,57 +1,69 @@
 # EnerCast — Product Requirements Document
 
-**Version**: 2.0
-**Last Updated**: 2026-04-01
-**Context**: WeatherNews Senior Data Scientist challenge — technical demonstration
-**Target**: Working demo across 3 energy domains (Wind, Demand, Solar)
+**Version**: 2.1
+**Last Updated**: 2026-04-02
+**Context**: ML framework for energy engineering professionals — demonstrated via WeatherNews challenge
+**Target**: Production-ready framework across 3 energy domains (Wind, Demand, Solar)
 
 ---
 
 ## 1. Executive Summary
 
-EnerCast (formerly WindCast) is a standardized ML framework for energy forecasting. It proves that a single pipeline pattern — parse, validate, QC, engineer features, train, evaluate, track — can work across fundamentally different energy forecasting domains: wind generation, power demand, and solar generation.
+EnerCast is an ML framework for energy engineering professionals. It provides pre-built data connectors, canonical schemas, QC pipelines, baseline models, and experiment tracking — so domain experts can focus on what actually drives forecast accuracy: feature engineering, model selection, and domain-specific evaluation.
 
-The project serves as a **technical case study for WeatherNews (WN)**, demonstrating that standardizing the mechanical parts of the ML pipeline frees engineer time for what actually drives accuracy: understanding client-specific data and context. This directly addresses WN's core tension: *standardize to liberate brain time, without blocking innovation*.
+The framework follows a single pipeline pattern — parse, validate, QC, engineer features, train, evaluate, track — that works across fundamentally different energy forecasting domains: wind generation, power demand, and solar generation. Domain-specific code is limited to a parser (~100 lines) and a feature configuration.
 
-**Demo goal:** Show 3 domains running through the same framework with only a parser + feature config as domain-specific code. MLflow UI shows cross-domain experiment comparison. Onboarding a new dataset takes < 2 hours.
+EnerCast is demonstrated as a **technical case study for WeatherNews (WN)**, proving that standardizing the mechanical parts of the ML pipeline frees engineer time for what matters: understanding client-specific data and context. This directly addresses WN's core tension: *standardize to liberate brain time, without blocking innovation*.
+
+**Key value proposition:** Engineers who know their domain (spot prices, wake effects, clearsky ratios) and know ML (XGBoost, feature engineering) get a framework where data plumbing, schemas, QC, and tracking are already done. They iterate on features, models, and KPIs — not on boilerplate.
 
 ---
 
 ## 2. Mission
 
-**Prove that one framework can serve wind, solar, and demand forecasting — so engineers spend time understanding clients, not rebuilding pipelines.**
+**Give energy engineers a framework where the plumbing is solved, so they spend time on features, models, and domain expertise — not rebuilding pipelines.**
 
 ### Core Principles
 
 1. **Domain-agnostic core** — one pipeline pattern, many domains. Adding a domain = writing a parser + feature config.
-2. **Reproducible by default** — every run tracked in MLflow with features, params, metrics, artifacts.
-3. **Simple over clever** — scripts over frameworks, Parquet over databases, XGBoost over Transformers.
-4. **Fail fast** — detailed errors, strict schemas, no silent data corruption.
-5. **Extensible, not rigid** — custom metrics, custom features, custom models plug in without touching the core.
+2. **Expert-friendly** — full control over feature sets, model choice, evaluation metrics. No black boxes.
+3. **Reproducible by default** — every run tracked in MLflow with features, params, metrics, artifacts.
+4. **Simple over clever** — scripts over frameworks, Parquet over databases, XGBoost over Transformers.
+5. **Fail fast** — detailed errors, strict schemas, no silent data corruption.
+6. **Extensible, not rigid** — custom metrics, custom features, custom models plug in without touching the core.
 
 ---
 
 ## 3. Target Users
 
-### Primary: WeatherNews evaluation panel
+### Primary: Energy domain professionals
 
-- **Yoel Chetboun** (Resp. Energie) — understands the domain pain points, evaluates relevance
-- **Michel Kolasinski** (Head of Ops) — evaluates operational feasibility, incremental approach
+Engineers and data scientists who work in energy forecasting (wind, solar, demand, gas). They:
+- **Know their domain** — power curves, wake effects, spot price dynamics, demand seasonality, solar degradation
+- **Know ML** — comfortable with XGBoost/LightGBM, feature engineering, train/val/test splits, hyperparameter tuning
+- **Need to iterate fast** — swap feature sets, compare models, test domain hypotheses in minutes
+- **Don't want to rebuild plumbing** — data ingestion, QC, schemas, MLflow logging should be ready to use
+
+What they need from EnerCast:
+- Pre-built connectors to common data sources (SCADA, ENTSO-E, PVDAQ, Open-Meteo)
+- Canonical schemas they can extend with domain-specific fields
+- Parameterizable QC rules they can tune per client/site
+- Named feature sets (baseline/enriched/full) they can modify and compare
+- Pluggable models and custom evaluation metrics (e.g., "MAPE when spot price > X")
+- MLflow tracking for reproducibility and cross-experiment comparison
+
+### WeatherNews evaluation panel (demo context)
+
+- **Yoel Chetboun** (Resp. Energie) — evaluates domain relevance, pain point coverage
+- **Michel Kolasinski** (Head of Ops) — evaluates operational feasibility, incremental adoption
 - **Craig West** (remote) — evaluates technical depth, architecture quality
 
-### What they need to see
-
+What they need to see:
 - That standardization is **possible** across their 3 domains
 - That it **doesn't kill flexibility** (custom metrics, custom features, new models)
 - That onboarding a new client/dataset is **fast** (hours, not days)
 - That experiments are **reproducible and comparable** (MLflow)
 - That the approach is **incremental** (no big bang, R can coexist)
-
-### Secondary: Solo ML engineer / data scientist
-
-- Deep Python experience, familiar with XGBoost/scikit-learn
-- Wants a reusable template for new energy forecasting projects
-- Pain points: repetitive data cleaning, non-reproducible experiments
 
 ---
 

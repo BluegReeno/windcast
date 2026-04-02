@@ -1,6 +1,28 @@
-# WindCast
+# EnerCast
 
-Standardized ML framework for wind power forecasting. Turns raw SCADA data into calibrated power forecasts using reproducible pipelines, MLflow experiment tracking, and open datasets.
+**ML framework for energy engineering professionals.** Pre-built pipelines, data connectors, schemas, and baseline models — so domain experts can focus on what drives accuracy: feature engineering, model selection, and result comparison.
+
+EnerCast handles the mechanical parts (data ingestion, QC, experiment tracking) while giving full control over the parts that require domain expertise (feature sets, model configuration, custom KPIs).
+
+## Who Is This For?
+
+Energy engineers and data scientists who:
+- **Know their domain** — spot price dynamics, wind farm performance assessment, solar degradation patterns
+- **Know ML** — comfortable with XGBoost, feature engineering, train/val/test splits
+- **Don't want to rebuild plumbing** — data connectors, schemas, QC rules, MLflow logging should be ready to use
+- **Need to iterate fast** — swap feature sets, compare models, test hypotheses in minutes, not days
+
+## What's Included
+
+| Layer | What You Get | What You Control |
+|-------|-------------|-----------------|
+| **Data connectors** | Parsers for SCADA, ENTSO-E, PVDAQ, Open-Meteo NWP | Add your own parser (~100 lines) |
+| **Schemas** | Typed canonical schemas per domain (wind, demand, solar) | Extend with domain-specific fields |
+| **QC pipeline** | Parameterizable rules (outliers, gaps, frozen sensors, holidays) | Adjust thresholds per client/site |
+| **Feature sets** | Named sets (baseline / enriched / full) per domain | Modify features, create custom sets |
+| **Models** | XGBoost + persistence benchmark, ready to train | Swap to LightGBM, add new models |
+| **Evaluation** | MAE, RMSE, MAPE, skill scores, regime analysis | Add custom KPIs (e.g., "accuracy when spot > X") |
+| **Experiment tracking** | MLflow logs everything — features, params, metrics, artifacts | Compare across domains in one UI |
 
 ## Quick Start
 
@@ -8,69 +30,77 @@ Standardized ML framework for wind power forecasting. Turns raw SCADA data into 
 # Install dependencies
 uv sync
 
-# Run tests
-uv run pytest tests/ -v
+# Wind pipeline (Kelmarsh dataset)
+uv run python scripts/ingest_kelmarsh.py        # Parse → QC → Parquet
+uv run python scripts/build_features.py          # Feature engineering
+uv run python scripts/train.py                   # Train → MLflow
+uv run python scripts/evaluate.py                # Evaluate → MLflow
+
+# Demand pipeline (Spain ENTSO-E dataset)
+uv run python scripts/ingest_spain_demand.py     # Parse → QC → Parquet
+uv run python scripts/build_features.py --domain demand --dataset spain_demand
+uv run python scripts/train.py --domain demand --dataset spain_demand
+uv run python scripts/evaluate.py --domain demand --dataset spain_demand
+
+# View results
+mlflow ui
 ```
+
+## Domains
+
+| Domain | Dataset | Source | Resolution | What It Demonstrates |
+|--------|---------|--------|-----------|---------------------|
+| **Wind** | Kelmarsh v4 (6 turbines) | Zenodo | 10 min | SCADA ingestion, power curve modeling, NWP integration |
+| **Demand** | Spain ENTSO-E | Kaggle | 1 hour | Load forecasting, calendar features, price correlation |
+| **Solar** | PVDAQ System 2 | NREL | 15 min | Irradiance-based forecasting, clearsky ratio *(planned)* |
+
+Same pipeline pattern, different parsers and feature configs. Adding a new domain = writing a parser + feature set.
 
 ## Project Structure
 
 ```
-windcast/
-├── CLAUDE.md                    # AI assistant guidelines
-├── README.md                    # This file
-├── pyproject.toml               # Dependencies and project config
-│
-├── src/windcast/                # Main package
-│   ├── config.py                # Settings (Pydantic), constants
-│   ├── data/                    # Data ingestion & QC
-│   │   ├── schema.py            # Canonical SCADA schema
-│   │   ├── kelmarsh.py          # Kelmarsh dataset parser
-│   │   ├── qc.py                # Quality control pipeline
-│   │   └── open_meteo.py        # NWP weather data
-│   ├── features/                # Feature engineering
-│   │   └── pipeline.py          # Standardized feature sets
-│   ├── models/                  # ML training & evaluation
-│   │   ├── xgboost.py           # XGBoost quantile regression
-│   │   ├── lightgbm.py          # LightGBM benchmark
-│   │   └── evaluation.py        # Metrics & skill scores
-│   └── api/                     # REST API (Phase 3)
-│
-├── scripts/                     # CLI entry points
-├── data/                        # Local data (GITIGNORED)
-├── mlruns/                      # MLflow tracking (GITIGNORED)
-├── tests/                       # Mirrors src/ structure
-│
-└── docs/
-    └── research/                # Brainstorming & research documents
+src/windcast/
+├── config.py                # Pydantic Settings + dataset configs
+├── data/                    # Data ingestion & QC
+│   ├── schema.py            # Wind SCADA schema (15 cols)
+│   ├── demand_schema.py     # Demand schema (11 cols)
+│   ├── kelmarsh.py          # Wind parser (Kelmarsh v4)
+│   ├── spain_demand.py      # Demand parser (ENTSO-E)
+│   ├── qc.py                # Wind QC (9 rules)
+│   ├── demand_qc.py         # Demand QC
+│   └── open_meteo.py        # NWP weather client (Open-Meteo)
+├── features/                # Feature engineering
+│   ├── registry.py          # Feature set registry (baseline/enriched/full)
+│   ├── wind.py              # Wind-specific features
+│   └── demand.py            # Demand-specific features
+├── models/                  # ML models (domain-agnostic)
+│   ├── xgboost_model.py     # XGBoost trainer
+│   ├── persistence.py       # Naive persistence benchmark
+│   └── evaluation.py        # Metrics, skill scores, regime analysis
+└── tracking/
+    └── mlflow_utils.py      # MLflow logging utilities
 ```
 
-## Documentation
+## Pipeline Pattern
 
-- **[PRD](.claude/PRD.md)** — Product Requirements Document
-- **[Status](.claude/STATUS.md)** — Current sprint and priorities
-- **[Brainstorming](docs/research/brainstorming-2026-03-31.md)** — Initial research & architecture decisions
-- **[Methodology](docs/research/methodology-scaling-pipeline.md)** — Scaling weather-to-energy pipelines
-
-## Datasets
-
-### SCADA (wind + production)
-
-| Dataset | Turbines | OEM | Period | Source |
-|---------|----------|-----|--------|--------|
-| **Kelmarsh v4** (primary) | 6 × Senvion MM92 | Senvion | 2016–2024 | [Zenodo](https://zenodo.org/records/16807551) |
-| **Hill of Towie** | 21 × Siemens SWT-2.3 | Siemens | 2016–2024 | [Zenodo](https://zenodo.org/records/14870023) |
-| **Penmanshiel v3** | 13 × Senvion MM82 | Senvion | 2016–2024 | [Zenodo](https://zenodo.org/records/16807304) |
-
-### Wind-only (NWP validation & features)
-
-| Dataset | Type | Period | Source |
-|---------|------|--------|--------|
-| **FINO1** | Offshore mast, North Sea | 2003–present | [BSH](https://login.bsh.de) |
-| **NWTC M2** | Onshore mast 82m, Colorado | 1996–present | [NREL MIDC](https://midcdmz.nrel.gov/apps/sitehome.pl?site=NWTC) |
+```
+Raw data (CSV/ZIP/API)
+    → [Parser] domain-specific mapping → canonical schema
+    → [QC] parameterized rules → flagged data → clean Parquet
+    → [Features] domain feature set → feature Parquet
+    → [Train] temporal split → model → MLflow run
+    → [Evaluate] metrics + skill scores + regime analysis → MLflow artifacts
+```
 
 ## Tech Stack
 
-Python 3.12+ | uv | Polars | XGBoost | LightGBM | MLflow | Open-Meteo | pytest | ruff | pyright
+Python 3.12+ · uv · Polars · XGBoost · LightGBM · scikit-learn · MLflow · Optuna · Open-Meteo · pytest · ruff · pyright
+
+## Documentation
+
+- **[PRD](.claude/PRD.md)** — Product requirements and architecture
+- **[Status](.claude/STATUS.md)** — Current sprint and priorities
+- **[Research](docs/research/)** — Dataset catalog, methodology, brainstorming
 
 ## License
 

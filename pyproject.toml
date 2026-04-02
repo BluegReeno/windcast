@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "windcast"
 version = "0.1.0"
-description = "Standardized ML framework for wind power forecasting"
+description = "ML framework for energy engineering professionals — wind, demand, solar forecasting"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
