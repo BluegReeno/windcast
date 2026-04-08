@@ -3,7 +3,6 @@
 import logging
 
 import mlflow
-import mlflow.xgboost  # pyright: ignore[reportPrivateImportUsage]
 import polars as pl
 import xgboost as xgb
 from pydantic import BaseModel
@@ -64,11 +63,8 @@ def train_xgboost(
         model.best_score,
     )
 
-    # Log to MLflow if active run
-    if mlflow.active_run():
-        mlflow.log_params(config.model_dump())
-        mlflow.log_metric("best_iteration", model.best_iteration)
-        mlflow.xgboost.log_model(xgb_model=model, name="model")  # pyright: ignore[reportPrivateImportUsage]
+    # Note: MLflow autolog handles param/metric/model logging automatically.
+    # No manual logging needed here — enable via mlflow.xgboost.autolog().
 
     return model
 

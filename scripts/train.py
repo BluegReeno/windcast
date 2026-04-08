@@ -17,7 +17,7 @@ from windcast.features import get_feature_set, list_feature_sets
 from windcast.models.evaluation import compute_metrics
 from windcast.models.persistence import compute_persistence_metrics
 from windcast.models.xgboost_model import XGBoostConfig, train_xgboost
-from windcast.tracking import log_evaluation_results, log_feature_set, setup_mlflow
+from windcast.tracking import log_evaluation_results, setup_mlflow
 
 logger = logging.getLogger(__name__)
 
@@ -175,29 +175,64 @@ def main() -> None:
 
     # Setup MLflow
     import mlflow
+    import mlflow.data
+    import mlflow.xgboost  # pyright: ignore[reportPrivateImportUsage]
 
     setup_mlflow(settings.mlflow_tracking_uri, experiment_name)
+    mlflow.xgboost.autolog(log_datasets=True, log_model_signatures=True)  # pyright: ignore[reportPrivateImportUsage]
 
     config = XGBoostConfig()
     target_col = dcfg["target"]
     lag1_col = dcfg["lag1"]
     run_label = args.turbine_id if domain == "wind" else dataset
+    data_resolution = 10 if domain == "wind" else 60
 
     with mlflow.start_run(run_name=f"{run_label}-{feature_set}"):
-        # Log experiment-level params
+        # Tags: searchable metadata
+        mlflow.set_tags(
+            {
+                "enercast.stage": "dev",
+                "enercast.domain": domain,
+                "enercast.purpose": "baseline",
+                "enercast.backend": "xgboost",
+                "enercast.data_resolution_min": str(data_resolution),
+            }
+        )
+
+        # Params: run config + split boundaries
+        ts_col = "timestamp_utc"
         mlflow.log_params(
             {
                 "domain": domain,
                 "dataset": dataset,
+                "feature_set": feature_set,
+                "n_features": len(available_cols),
                 "horizons": str(horizons),
                 "n_train": len(train_df),
                 "n_val": len(val_df),
                 "n_test": len(test_df),
+                "split.train_start": str(train_df[ts_col].min()),
+                "split.train_end": str(train_df[ts_col].max()),
+                "split.val_start": str(val_df[ts_col].min()),
+                "split.val_end": str(val_df[ts_col].max()),
+                "split.test_start": str(test_df[ts_col].min()),
+                "data.source_file": str(parquet_path),
+                "data.n_rows_total": len(df),
             }
         )
         if domain == "wind":
             mlflow.log_param("turbine_id", args.turbine_id)
-        log_feature_set(feature_set, available_cols)
+
+        # Dataset provenance: native MLflow tracking with auto-hash
+        src = str(parquet_path)
+        train_dataset = mlflow.data.from_polars(
+            train_df, source=src, name=f"{dataset}-{run_label}-train", targets=target_col
+        )
+        val_dataset = mlflow.data.from_polars(
+            val_df, source=src, name=f"{dataset}-{run_label}-val", targets=target_col
+        )
+        mlflow.log_input(train_dataset, context="training")
+        mlflow.log_input(val_dataset, context="validation")
 
         # Train per horizon
         for h in horizons:

@@ -8,6 +8,7 @@ Usage:
 
 import argparse
 import logging
+from datetime import datetime
 from pathlib import Path
 
 import mlflow
@@ -46,9 +47,9 @@ def _temporal_split(
 ) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
     """Split DataFrame temporally using year-based boundaries on ds column."""
     ts = df.get_column("ds")
-    start = ts.min()
-    train_end = start.offset_by(f"{train_years}y")  # type: ignore[union-attr]
-    val_end = train_end.offset_by(f"{val_years}y")
+    start: datetime = ts.min()  # type: ignore[assignment]
+    train_end = start.replace(year=start.year + train_years)
+    val_end = train_end.replace(year=train_end.year + val_years)
 
     train = df.filter(pl.col("ds") < train_end)
     val = df.filter((pl.col("ds") >= train_end) & (pl.col("ds") < val_end))
@@ -181,17 +182,40 @@ def main() -> None:
     config = MLForecastConfig(strategy=args.strategy)
     run_label = args.turbine_id if domain == "wind" else dataset
 
+    data_resolution = 10 if domain == "wind" else 60
+
     with mlflow.start_run(run_name=f"mlforecast-{run_label}-{feature_set}"):
+        # Tags: searchable metadata
+        mlflow.set_tags(
+            {
+                "enercast.stage": "dev",
+                "enercast.domain": domain,
+                "enercast.purpose": "baseline",
+                "enercast.backend": "mlforecast",
+                "enercast.data_resolution_min": str(data_resolution),
+            }
+        )
+
+        # Params: run config + split boundaries
         mlflow.log_params(
             {
                 "domain": domain,
                 "dataset": dataset,
+                "feature_set": feature_set,
+                "n_features": len(available_exog),
                 "horizons": str(horizons),
                 "strategy": config.strategy,
                 "n_train": len(train_df),
                 "n_val": len(val_df),
                 "n_test": len(test_df),
                 "backend": "mlforecast",
+                "split.train_start": str(train_df["ds"].min()),
+                "split.train_end": str(train_df["ds"].max()),
+                "split.val_start": str(val_df["ds"].min()),
+                "split.val_end": str(val_df["ds"].max()),
+                "split.test_start": str(test_df["ds"].min()),
+                "data.source_file": str(parquet_path),
+                "data.n_rows_total": len(df_ml),
             }
         )
         if domain == "wind":

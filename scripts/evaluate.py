@@ -7,6 +7,7 @@ Usage:
 
 import argparse
 import logging
+from datetime import datetime
 from pathlib import Path
 
 import mlflow
@@ -94,9 +95,9 @@ def _temporal_split(
 ) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
     """Split DataFrame temporally (same logic as train.py)."""
     ts = df.get_column("timestamp_utc")
-    start = ts.min()
-    train_end = start.offset_by(f"{train_years}y")  # type: ignore[union-attr]
-    val_end = train_end.offset_by(f"{val_years}y")
+    start: datetime = ts.min()  # type: ignore[assignment]
+    train_end = start.replace(year=start.year + train_years)
+    val_end = train_end.replace(year=train_end.year + val_years)
 
     train = df.filter(pl.col("timestamp_utc") < train_end)
     val = df.filter((pl.col("timestamp_utc") >= train_end) & (pl.col("timestamp_utc") < val_end))
@@ -262,6 +263,14 @@ def main() -> None:
     all_results: list[dict[str, float | int]] = []
 
     with mlflow.start_run(run_name=f"eval-{run_label}"):
+        mlflow.set_tags(
+            {
+                "enercast.stage": "dev",
+                "enercast.domain": domain,
+                "enercast.purpose": "eval",
+                "enercast.backend": "xgboost",
+            }
+        )
         mlflow.log_params(
             {
                 "eval_run_id": run_id,

@@ -17,7 +17,7 @@
 |------|------|-------|--------|------|
 | 1 | **Ingest Kelmarsh** — run `ingest_kelmarsh.py` on real ZIP, fix any path issues | `data/KelmarshV4/16807551.zip` | `data/processed/kelmarsh_*.parquet` | [x] |
 | 2 | **Build features + train baseline** — run `build_features.py` then `train.py --feature-set wind_baseline` | `data/processed/` | `data/features/` + MLflow run | [x] |
-| 3 | **Train enriched + evaluate** — run `train.py --feature-set wind_enriched` then `evaluate.py` on both | MLflow runs | Skill scores, MAE per horizon, regime analysis | [ ] |
+| 3 | **Train enriched + evaluate** — run `train.py --feature-set wind_enriched` then `evaluate.py` on both | MLflow runs | Skill scores, MAE per horizon, regime analysis | [x] |
 | 4 | **mlforecast comparison** — run `train_mlforecast.py` on wind, compare with XGBoost in MLflow | `data/processed/` | XGBoost vs mlforecast metrics side by side | [ ] |
 
 **Known risk:** `ingest_kelmarsh.py` expects `data/raw/kelmarsh/*.zip` but data is at `data/KelmarshV4/16807551.zip`. Pass `--raw-path` or fix the path. This will likely eat some time in pass 1.
@@ -25,7 +25,7 @@
 **Wednesday exit criteria:**
 - [x] `data/processed/` has Kelmarsh Parquets (6 turbines, 473k rows each)
 - [x] `data/features/` has feature Parquets (6 turbines, 272k-318k rows, 29 cols)
-- [ ] MLflow has at least 2 wind runs (baseline + enriched) with real metrics
+- [x] MLflow has at least 2 wind runs (baseline + enriched) with real metrics
 - [x] Skill score > 0 at h1 (model beats persistence) — skill=0.203, MAE=120 kW
 - [ ] Can articulate "roadmap to improve" based on actual results
 
@@ -75,11 +75,23 @@
 - [x] 234 tests passing, ruff + pyright clean
 - [x] 7 CLI scripts covering full pipeline
 
+### MLflow Integration (Pass 2.5)
+- [x] XGBoost autolog (replaces manual param/model logging, adds feature importance)
+- [x] Dataset provenance via `mlflow.data.from_polars()` (auto-hash train/val)
+- [x] Lineage tags: stage, domain, purpose, backend, data_resolution
+- [x] Split boundaries logged as params (train/val/test dates)
+- [x] Git commit auto-captured as system tag
+
 ### Research & Planning
 - [x] WN challenge CR + detailed slide analysis
 - [x] WattCast learnings document (4 real incidents)
 - [x] ML backends comparison (XGBoost vs mlforecast)
 - [x] Presentation plan (7 slides, narrative arc)
+
+### Planned Improvements (post-presentation)
+- [ ] `mlflow.evaluate()` — replace manual evaluation with MLflow's eval framework (auto residual plots, SHAP, R²). Keep custom skill_score + regime_analysis via `extra_metrics`
+- [ ] AutoGluon-TimeSeries — 3rd backend, ensemble of DeepAR/TFT/Chronos/XGBoost, probabilistic forecasts
+- [ ] Migrate MLflow backend from `file:./mlruns` to `sqlite:///mlflow.db`
 
 ---
 
