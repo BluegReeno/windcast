@@ -19,12 +19,13 @@ KELMARSH_SIGNAL_MAP: dict[str, str] = {
     "Wind direction (°)": "wind_direction_deg",
     "Power (kW)": "active_power_kw",
     "Nacelle position (°)": "nacelle_direction_deg",
-    "Rotor speed (rpm)": "rotor_rpm",
+    "Rotor speed (RPM)": "rotor_rpm",
     "Blade angle (pitch position) A (°)": "pitch_a_deg",
     "Blade angle (pitch position) B (°)": "pitch_b_deg",
     "Blade angle (pitch position) C (°)": "pitch_c_deg",
     "Nacelle ambient temperature (°C)": "ambient_temp_c",
     "Nacelle temperature (°C)": "nacelle_temp_c",
+    "Data Availability": "data_availability",
 }
 
 KELMARSH_COLUMNS: list[str] = list(KELMARSH_SIGNAL_MAP.keys())
@@ -68,7 +69,11 @@ def _parse_from_directory(directory: Path) -> pl.DataFrame:
         df = _read_turbine_csv(csv_bytes, turbine_id)
         frames.append(df)
 
-    return pl.concat(frames).sort("timestamp_utc", "turbine_id")
+    return (
+        pl.concat(frames)
+        .unique(subset=["timestamp_utc", "turbine_id"], keep="first")
+        .sort("timestamp_utc", "turbine_id")
+    )
 
 
 def _parse_from_zip(zip_path: Path) -> pl.DataFrame:
@@ -94,7 +99,11 @@ def _parse_from_zip(zip_path: Path) -> pl.DataFrame:
     if not frames:
         raise ValueError(f"No turbine data CSVs found in {zip_path}")
 
-    return pl.concat(frames).sort("timestamp_utc", "turbine_id")
+    return (
+        pl.concat(frames)
+        .unique(subset=["timestamp_utc", "turbine_id"], keep="first")
+        .sort("timestamp_utc", "turbine_id")
+    )
 
 
 def _parse_zip_contents(zf: zipfile.ZipFile) -> list[pl.DataFrame]:
@@ -127,16 +136,37 @@ def _extract_turbine_id(filename: str) -> str:
     return f"KWF{match.group(1)}"
 
 
+def _strip_comment_lines(csv_bytes: bytes) -> bytes:
+    """Strip Greenbyte comment lines from CSV bytes.
+
+    Real Kelmarsh CSVs have 9 comment lines (lines 0-8) before the header.
+    Comment lines start with '#' and do NOT contain 'Date and time'.
+    The header line starts with '# Date and time' — this must be preserved.
+
+    No-op if no comment lines are present (e.g. test data).
+    """
+    text = csv_bytes.decode("utf-8")
+    lines = text.split("\n")
+    filtered = [
+        line for line in lines if not (line.startswith("#") and "Date and time" not in line)
+    ]
+    return "\n".join(filtered).encode("utf-8")
+
+
 def _read_turbine_csv(csv_bytes: bytes, turbine_id: str) -> pl.DataFrame:
     """Read a single Kelmarsh turbine CSV and map to canonical columns.
 
     Handles column selection, renaming, pitch averaging, timestamp parsing,
     and default flag initialization.
     """
+    csv_bytes = _strip_comment_lines(csv_bytes)
+
     df = pl.read_csv(
         io.BytesIO(csv_bytes),
         infer_schema_length=10_000,
         null_values=["", "NA", "NaN", "N/A", "-999", "-9999"],
+        truncate_ragged_lines=True,
+        ignore_errors=True,
     )
 
     # Verify expected columns exist
@@ -153,6 +183,26 @@ def _read_turbine_csv(csv_bytes: bytes, turbine_id: str) -> pl.DataFrame:
 
     # Select and rename mapped columns
     df = df.select(mapped_cols).rename({k: KELMARSH_SIGNAL_MAP[k] for k in mapped_cols})
+
+    # Cast numeric columns to Float64 (ignore_errors=True may infer them as str)
+    numeric_cols = [
+        c
+        for c in df.columns
+        if c not in ("timestamp_raw", "data_availability") and df[c].dtype != pl.Float64
+    ]
+    if numeric_cols:
+        df = df.with_columns([pl.col(c).cast(pl.Float64, strict=False) for c in numeric_cols])
+
+    # Use Data Availability for QC: 0 = fault/curtailed → mark as non-operational
+    has_data_avail = "data_availability" in df.columns
+    if has_data_avail:
+        df = df.with_columns(
+            pl.when(pl.col("data_availability").cast(pl.Float64, strict=False) == 0)
+            .then(pl.lit(1))
+            .otherwise(pl.lit(0))
+            .cast(pl.Int32)
+            .alias("_status_from_avail")
+        ).drop("data_availability")
 
     # Average pitch angles A/B/C → single pitch_angle_deg
     pitch_cols = [c for c in ["pitch_a_deg", "pitch_b_deg", "pitch_c_deg"] if c in df.columns]
@@ -191,12 +241,15 @@ def _read_turbine_csv(csv_bytes: bytes, turbine_id: str) -> pl.DataFrame:
     )
 
     # Initialize QC/flag columns with defaults
+    status_expr = pl.col("_status_from_avail") if has_data_avail else pl.lit(0).cast(pl.Int32)
     df = df.with_columns(
-        pl.lit(0).cast(pl.Int32).alias("status_code"),
+        status_expr.alias("status_code"),
         pl.lit(False).alias("is_curtailed"),
         pl.lit(False).alias("is_maintenance"),
         pl.lit(0).cast(pl.UInt8).alias("qc_flag"),
     )
+    if has_data_avail:
+        df = df.drop("_status_from_avail")
 
     # Ensure all schema columns exist, adding nulls for any missing
     for col, dtype in SCADA_SCHEMA.items():

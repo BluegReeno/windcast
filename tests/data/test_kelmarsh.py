@@ -9,25 +9,43 @@ import pytest
 from windcast.data.kelmarsh import (
     _extract_turbine_id,
     _read_turbine_csv,
+    _strip_comment_lines,
     parse_kelmarsh,
 )
 from windcast.data.schema import validate_schema
+
+_GREENBYTE_COMMENT_LINES = [
+    "# This file was exported by Greenbyte at 2022-01-27 10:33:05 (UTC)",
+    "#",
+    "# Turbine: Kelmarsh 1",
+    "# Turbine type: Senvion MM92",
+    "# Time zone: UTC",
+    "# Time interval: 2016-01-01 00:00:00 - 2016-12-31 23:50:00",
+    "#",
+    '# Data that is missing or is erroneous has been marked with "NaN"',
+    "#",
+]
 
 
 def _make_csv_bytes(
     n_rows: int = 10,
     turbine_num: int = 1,
     power_scale: float = 1.0,
+    include_comments: bool = False,
 ) -> bytes:
     """Create synthetic CSV bytes matching Kelmarsh format."""
-    rows = []
+    rows: list[str] = []
+
+    if include_comments:
+        rows.extend(_GREENBYTE_COMMENT_LINES)
+
     header = (
         "# Date and time,"
         "Wind speed (m/s),"
         "Wind direction (°),"
         "Power (kW),"
         "Nacelle position (°),"
-        "Rotor speed (rpm),"
+        "Rotor speed (RPM),"
         "Blade angle (pitch position) A (°),"
         "Blade angle (pitch position) B (°),"
         "Blade angle (pitch position) C (°),"
@@ -194,3 +212,37 @@ class TestParseKelmarsh:
         (tmp_path / "subdir").mkdir()
         with pytest.raises(FileNotFoundError):
             parse_kelmarsh(tmp_path / "subdir")
+
+
+class TestStripCommentLines:
+    def test_noop_without_comments(self):
+        """No comment lines → bytes unchanged."""
+        csv_bytes = _make_csv_bytes(n_rows=3)
+        result = _strip_comment_lines(csv_bytes)
+        assert result == csv_bytes
+
+    def test_strips_greenbyte_comments(self):
+        """Comment lines are removed, header preserved."""
+        csv_bytes = _make_csv_bytes(n_rows=3, include_comments=True)
+        result = _strip_comment_lines(csv_bytes)
+        text = result.decode("utf-8")
+        assert text.startswith("# Date and time,")
+        assert "exported by Greenbyte" not in text
+
+
+class TestRealCsvFormat:
+    def test_real_csv_format_with_comments(self):
+        """Parser handles real Greenbyte CSV format with 9 comment lines."""
+        csv_bytes = _make_csv_bytes(n_rows=5, include_comments=True)
+        df = _read_turbine_csv(csv_bytes, "KWF1")
+        errors = validate_schema(df)
+        assert errors == [], f"Schema errors: {errors}"
+        assert len(df) == 5
+
+    def test_real_csv_format_without_comments(self):
+        """Parser still handles clean CSV format (backward compat)."""
+        csv_bytes = _make_csv_bytes(n_rows=5)
+        df = _read_turbine_csv(csv_bytes, "KWF1")
+        errors = validate_schema(df)
+        assert errors == [], f"Schema errors: {errors}"
+        assert len(df) == 5

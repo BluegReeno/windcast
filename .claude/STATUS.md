@@ -1,145 +1,107 @@
 # EnerCast - Current Status
 
-**Last Updated**: 2026-04-02
-**Context**: WeatherNews challenge — demo presentation next week (English, Craig present)
-**Current Phase**: Phase 3 — Solar Domain DONE
-**Priority**: Wind E2E → Demand domain → Solar (stretch) → Presentation
+**Last Updated**: 2026-04-08
+**Context**: WeatherNews challenge — PPT presentation next week (English, Craig remote)
+**Current Phase**: Phase 4 — Run pipelines + build presentation
+**Budget**: 5 hours (Wed 2h + Thu 3h), ~10 core_piv_loop passes
 
 ---
 
-## Current Focus
+## Sprint Plan: Wed 8 → Thu 9 April
 
-**Deadline**: Presentation next week (date TBC), in English, with Craig West remote
+### Wednesday (2h = 4 passes) — Wind End-to-End
 
-### Priority Order
+**Goal:** Run the full wind pipeline on Kelmarsh real data. Get actual metrics in MLflow.
 
-1. **Phase 1 — Wind End-to-End** - DONE
-   - Data ingestion DONE (schema, parser, QC, Open-Meteo)
-   - Feature engineering DONE (registry, wind features, build_features CLI)
-   - Train + evaluate + MLflow DONE (XGBoost, persistence baseline, evaluation, CLI scripts)
-2. **Phase 2 — Demand Domain** - DONE
-   - Demand schema (11-col canonical) DONE
-   - Spain parser (energy + weather CSVs) DONE
-   - Demand QC (load/weather outliers, holidays, DST, gap fill) DONE
-   - Demand features (3 sets: baseline/enriched/full) DONE
-   - Script integration (--domain flag on build_features/train/evaluate) DONE
-   - Tests passing, ruff/pyright/pytest all green
-3. **Phase 3 — Solar Domain** - DONE
-   - Solar schema (10-col canonical) DONE
-   - PVDAQ System 4 parser (CSV → canonical, 1-min → 15-min aggregation) DONE
-   - Solar QC (nighttime power, irradiance/temp outliers, power-irradiance consistency, gap fill) DONE
-   - Solar features (3 sets: baseline/enriched/full) DONE
-   - Script integration (--domain solar on build_features/train/evaluate) DONE
-   - 201 tests passing, ruff/pyright/pytest all green
-4. **Phase 4 — Presentation** - TODO
+| Pass | Task | Input | Output | Done |
+|------|------|-------|--------|------|
+| 1 | **Ingest Kelmarsh** — run `ingest_kelmarsh.py` on real ZIP, fix any path issues | `data/KelmarshV4/16807551.zip` | `data/processed/kelmarsh_*.parquet` | [x] |
+| 2 | **Build features + train baseline** — run `build_features.py` then `train.py --feature-set wind_baseline` | `data/processed/` | `data/features/` + MLflow run | [ ] |
+| 3 | **Train enriched + evaluate** — run `train.py --feature-set wind_enriched` then `evaluate.py` on both | MLflow runs | Skill scores, MAE per horizon, regime analysis | [ ] |
+| 4 | **mlforecast comparison** — run `train_mlforecast.py` on wind, compare with XGBoost in MLflow | `data/processed/` | XGBoost vs mlforecast metrics side by side | [ ] |
 
----
+**Known risk:** `ingest_kelmarsh.py` expects `data/raw/kelmarsh/*.zip` but data is at `data/KelmarshV4/16807551.zip`. Pass `--raw-path` or fix the path. This will likely eat some time in pass 1.
 
-## What's DONE
+**Wednesday exit criteria:**
+- [x] `data/processed/` has Kelmarsh Parquets (6 turbines, 473k rows each)
+- [ ] `data/features/` has feature Parquets
+- [ ] MLflow has at least 2 wind runs (baseline + enriched) with real metrics
+- [ ] Skill score > 0 at h1 (model beats persistence)
+- [ ] Can articulate "roadmap to improve" based on actual results
 
-### Phase 1.1: Project Setup (DONE)
-- [x] `pyproject.toml` with all deps + tool configs
-- [x] `src/windcast/` package structure
-- [x] `.gitignore` for Python/data/MLflow
-- [x] `uv sync` — 109 packages installed
-- [x] Validation: ruff, pyright, pytest all pass
+### Thursday AM (2h = 4 passes) — Demand Domain
 
-### Phase 1.2: Data Ingestion (DONE)
-- [x] `config.py` — Pydantic Settings, 3 dataset configs, QC thresholds
-- [x] `schema.py` — 15-column canonical SCADA schema + validation
-- [x] `kelmarsh.py` — Nested ZIP parser, signal mapping, pitch averaging
-- [x] `qc.py` — 9 QC rules (maintenance, outliers, curtailment, frozen, gap-fill)
-- [x] `open_meteo.py` — Cached Open-Meteo historical weather client
-- [x] `ingest_kelmarsh.py` — CLI script: parse → QC → per-turbine Parquet
-- [x] 50 tests passing, ruff, pyright, pytest all green
+**Goal:** Prove cross-domain by running demand pipeline. Zero core changes.
 
----
+| Pass | Task | Input | Output | Done |
+|------|------|-------|--------|------|
+| 5 | **Download Spain data + ingest** — Kaggle download (4 MB CSV), run `ingest_spain_demand.py` | Kaggle CSV | `data/processed/spain_demand.parquet` | [ ] |
+| 6 | **Build features + train** — `build_features.py --domain demand` then `train.py --domain demand` | `data/processed/` | Demand metrics in MLflow | [ ] |
+| 7 | **Evaluate + compare** — `evaluate.py --domain demand`, screenshot MLflow with wind + demand | MLflow runs | Cross-domain comparison | [ ] |
 
-## What's NEXT
+**Thursday AM exit criteria:**
+- [ ] Demand pipeline ran with zero core pipeline changes
+- [ ] MLflow shows wind AND demand experiments
+- [ ] Can state "adding demand = parser + feature config, zero core changes"
 
-### Phase 1.3: Wind Feature Engineering + ML (DONE)
-- [x] `features/registry.py` — Feature set registry (baseline/enriched/full)
-- [x] `features/wind.py` — Wind-specific feature builders
-- [x] `scripts/build_features.py` — Feature building CLI
-- [x] `models/persistence.py` — Naive persistence benchmark
-- [x] `models/xgboost_model.py` — XGBoost with MLflow logging
-- [x] `models/evaluation.py` — Metrics, skill scores, regime analysis
-- [x] `tracking/mlflow_utils.py` — MLflow tracking utilities
-- [x] `scripts/train.py` — Training CLI with MLflow
-- [x] `scripts/evaluate.py` — Evaluation CLI
-- [x] 39 new tests (89 total), ruff, pyright, pytest all green
+### Thursday PM (1h = 2 passes) — Build PPT
 
-### Phase 2: Demand Domain (DONE)
-- [x] Demand schema (timestamp, load_mw, temperature, price, calendar)
-- [x] Spain demand parser (Kaggle CSV → canonical schema)
-- [x] Demand QC rules
-- [x] Demand feature sets (lags H-1/D-1/W-1, calendar, temperature)
-- [x] Demand dataset config
-- [x] `scripts/ingest_spain_demand.py`
-- [x] Same train.py + evaluate.py work with `--domain demand`
-- [x] Tests
+**Goal:** Assemble presentation from real results.
 
-### Phase 3: Solar Domain (DONE)
-- [x] Solar schema (10-col canonical)
-- [x] PVDAQ System 4 parser (CSV → canonical, 1-min → 15-min aggregation, UTC conversion)
-- [x] Solar QC pipeline (6 rules: nighttime power, power/irradiance/temp outliers, consistency, gap fill)
-- [x] Solar feature sets (baseline/enriched/full) registered in feature registry
-- [x] Script integration (ingest_pvdaq.py + --domain solar on build_features/train/evaluate)
-- [x] Tests (53 new tests, 201 total)
+| Pass | Task | Output | Done |
+|------|------|--------|------|
+| 8 | **Populate slides 4-5** — extract metrics tables, take MLflow screenshots, write talking points | Slides with real numbers | [ ] |
+| 9 | **Complete slides 1-3, 6-7** — narrative, framework diagram, WattCast incidents, roadmap | Full 7-slide deck content | [ ] |
+| 10 | **Review + polish** — flow, English, key messages per audience (Yoel/Michel/Craig) | Presentation-ready PPT content | [ ] |
 
-### Phase 4: Presentation (Day 5)
-- [ ] Slide deck (English): "I understood / Here's proof / Here's the roadmap"
-- [ ] Live demo script
-- [ ] WN roadmap (3 horizons)
-- [ ] Dry run
+**Thursday exit criteria:**
+- [ ] 7-slide structure complete with real metrics
+- [ ] Key talking points per slide written
+- [ ] Ready to build final PPT on Friday
 
 ---
 
-## Quick Commands
+## What's DONE (Phases 1-3)
 
-```bash
-# Setup
-uv sync
+### Framework (code complete, tested, never run on real data)
+- [x] 3 domain schemas (wind 15-col, demand 11-col, solar 10-col)
+- [x] 3 parsers (Kelmarsh, Spain ENTSO-E, PVDAQ System 4)
+- [x] 3 QC pipelines (wind 9 rules, demand, solar)
+- [x] 18 feature sets (3 domains x 3 levels x 2 backends)
+- [x] 2 ML backends (XGBoost manual + mlforecast/Nixtla)
+- [x] Evaluation (MAE, RMSE, MAPE, skill score, bias, regime analysis)
+- [x] MLflow tracking integration
+- [x] Persistence baseline
+- [x] 234 tests passing, ruff + pyright clean
+- [x] 7 CLI scripts covering full pipeline
 
-# Validation (run before every commit)
-uv run ruff check src/ tests/ scripts/
-uv run ruff format --check src/ tests/ scripts/
-uv run pyright src/
-uv run pytest tests/ -v
-
-# Pipeline (once built)
-uv run python scripts/ingest_kelmarsh.py      # Wind: parse → QC → Parquet
-uv run python scripts/build_features.py        # Features → Parquet
-uv run python scripts/train.py                 # Train → MLflow
-uv run python scripts/evaluate.py              # Evaluate → MLflow
-mlflow ui                                      # View results
-```
-
----
-
-## Key Decision Log
-
-| Date | Decision | Rationale |
-|------|----------|-----------|
-| 2026-04-01 | Pivot from WindCast → EnerCast (multi-domain) | WN challenge requires proving cross-domain standardization |
-| 2026-04-01 | Wind + Demand priority over Wind + Solar | Demand is WN's biggest pain point (MARS legacy). Structurally different from wind = stronger proof of genericity |
-| 2026-04-01 | Spain ENTSO-E dataset for demand | CC0, demand + weather + prices in one CSV, 4 MB, zero friction |
-| 2026-04-01 | Solar (PVDAQ) as stretch goal | Nice to have but Wind + Demand alone proves the point |
-| 2026-04-01 | Defer Hill of Towie / Penmanshiel | One wind dataset is enough for the demo. Cross-OEM testing is secondary |
+### Research & Planning
+- [x] WN challenge CR + detailed slide analysis
+- [x] WattCast learnings document (4 real incidents)
+- [x] ML backends comparison (XGBoost vs mlforecast)
+- [x] Presentation plan (7 slides, narrative arc)
 
 ---
 
-## Tech Stack
+## Key Documents
 
-| Layer | Technology |
-|-------|------------|
-| Language | Python 3.12 |
-| Package Manager | uv |
-| Data | Polars 1.39 |
-| ML | XGBoost 3.2, LightGBM 4.6, scikit-learn 1.8 |
-| Tracking | MLflow 3.10 |
-| Tuning | Optuna 4.8 |
+| Document | Purpose |
+|----------|---------|
+| `docs/WNchallenge/presentation-plan.md` | Slide-by-slide PPT plan |
+| `docs/WNchallenge/wattcast-learnings-for-wn.md` | Real incidents for credibility |
+| `docs/WNchallenge/CR WeatherNews...` | Meeting notes from briefing |
+| `docs/WNchallenge/Analyse Presentation...` | Detailed WN slide analysis |
+| `.claude/reference/ml-backends-comparison.md` | XGBoost vs mlforecast strategy |
 
 ---
 
-**Next Action**: Phase 4 — Presentation prep (slide deck, live demo script, WN roadmap)
+## Session Handoff Protocol
+
+Each session should:
+1. Read this STATUS.md to know where we are
+2. Pick up the next unchecked task
+3. Mark tasks `[x]` as they complete
+4. If a task fails or takes longer than expected, note it and adjust the plan
+5. At end of session, update this file with current state
+
+**The plan is sequential — each pass depends on the previous one succeeding.** If pass 1 (ingestion) fails, everything downstream blocks. Prioritize unblocking over perfection.
