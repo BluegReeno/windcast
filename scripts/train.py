@@ -227,7 +227,13 @@ def main() -> None:
     import mlflow.xgboost  # pyright: ignore[reportPrivateImportUsage]
 
     setup_mlflow(settings.mlflow_tracking_uri, experiment_name)
-    mlflow.xgboost.autolog(log_datasets=True, log_model_signatures=True)  # pyright: ignore[reportPrivateImportUsage]
+
+    # Autolog XGBoost but reduce noise: skip redundant model/dataset logging
+    mlflow.xgboost.autolog(  # pyright: ignore[reportPrivateImportUsage]
+        log_datasets=False,
+        log_models=False,
+        log_model_signatures=False,
+    )
 
     config = XGBoostConfig()
     target_col = dcfg["target"]
@@ -235,19 +241,30 @@ def main() -> None:
     run_label = args.turbine_id if domain == "wind" else dataset
     data_resolution = 10 if domain == "wind" else 60
 
-    with mlflow.start_run(run_name=f"{run_label}-{feature_set}"):
-        # Tags: searchable metadata
-        mlflow.set_tags(
-            {
-                "enercast.stage": "dev",
-                "enercast.domain": domain,
-                "enercast.purpose": "baseline",
-                "enercast.backend": "xgboost",
-                "enercast.data_resolution_min": str(data_resolution),
-            }
-        )
+    # Horizon descriptions for human-readable labels
+    horizon_desc: dict[int, str] = {}
+    for h in horizons:
+        minutes = h * data_resolution
+        if minutes < 60:
+            horizon_desc[h] = f"{minutes} min ahead"
+        elif minutes < 1440:
+            horizon_desc[h] = f"{minutes // 60}h ahead"
+        else:
+            horizon_desc[h] = f"D+{minutes // 1440}"
 
-        # Params: run config + split boundaries
+    # Parent tags shared with child runs
+    parent_tags = {
+        "enercast.stage": "dev",
+        "enercast.domain": domain,
+        "enercast.purpose": "baseline",
+        "enercast.backend": "xgboost",
+        "enercast.data_resolution_min": str(data_resolution),
+        "enercast.feature_set": feature_set,
+    }
+
+    with mlflow.start_run(run_name=f"{run_label}-{feature_set}"):
+        mlflow.set_tags(parent_tags)
+
         ts_col = "timestamp_utc"
         mlflow.log_params(
             {
@@ -271,7 +288,7 @@ def main() -> None:
         if domain == "wind":
             mlflow.log_param("turbine_id", args.turbine_id)
 
-        # Dataset provenance: native MLflow tracking with auto-hash
+        # Dataset provenance
         src = str(parquet_path)
         train_dataset = mlflow.data.from_polars(
             train_df, source=src, name=f"{dataset}-{run_label}-train", targets=target_col
@@ -282,14 +299,16 @@ def main() -> None:
         mlflow.log_input(train_dataset, context="training")
         mlflow.log_input(val_dataset, context="validation")
 
+        # Collect results for parent summary
+        results_summary: list[str] = []
+
         # Train per horizon
         for h in horizons:
-            logger.info("=== Horizon h=%d ===", h)
+            logger.info("=== Horizon h=%d (%s) ===", h, horizon_desc[h])
 
             # Resolve NWP columns for this specific horizon
             if has_nwp_horizons:
                 h_cols, rename_map = _resolve_horizon_features(df.columns, fs.columns, h)
-                # Combine: non-NWP features + horizon-specific NWP features
                 feature_cols_h = [c for c in available_non_nwp if not c.startswith("nwp_")] + [
                     c for c in h_cols if c.startswith("nwp_")
                 ]
@@ -309,15 +328,20 @@ def main() -> None:
                 continue
 
             with mlflow.start_run(run_name=f"h{h:02d}", nested=True):
+                # Propagate parent tags + horizon-specific tags
+                mlflow.set_tags(
+                    {
+                        **parent_tags,
+                        "enercast.horizon_steps": str(h),
+                        "enercast.horizon_desc": horizon_desc[h],
+                    }
+                )
                 mlflow.log_params({"horizon_steps": h, "n_features": len(feature_cols_h)})
 
-                # Train XGBoost
                 model = train_xgboost(X_train, y_train, X_val, y_val, config)
-
-                # Evaluate on validation set
                 y_pred = model.predict(X_val)
 
-                # Persistence baseline (lag1 column)
+                # Persistence baseline
                 if lag1_col in X_val.columns:
                     y_persistence = X_val.get_column(lag1_col).to_numpy()
                     metrics = compute_metrics(y_val.to_numpy(), y_pred, y_persistence=y_persistence)
@@ -332,14 +356,64 @@ def main() -> None:
 
                 log_evaluation_results(metrics, horizon=h)
 
+                # Child run description
+                mae = metrics["mae"]
+                rmse = metrics["rmse"]
+                skill = metrics.get("skill_score", float("nan"))
+                bias = metrics.get("bias", float("nan"))
+                best_iter = int(model.best_iteration) if hasattr(model, "best_iteration") else "?"
+                child_desc = (
+                    f"## Horizon h{h} — {horizon_desc[h]}\n\n"
+                    f"**Feature set:** {feature_set} | "
+                    f"**Features:** {len(feature_cols_h)} | "
+                    f"**Trees:** {best_iter}\n\n"
+                    f"| Metric | Value |\n|--------|-------|\n"
+                    f"| MAE | {mae:.1f} kW |\n"
+                    f"| RMSE | {rmse:.1f} kW |\n"
+                    f"| Skill score | {skill:.3f} |\n"
+                    f"| Bias | {bias:+.1f} kW |\n"
+                )
+                mlflow.set_tag("mlflow.note.content", child_desc)
+
+                # Bubble up metrics to parent run
+
                 logger.info(
                     "h=%d: MAE=%.1f, RMSE=%.1f, skill=%.3f (%d features)",
                     h,
-                    metrics["mae"],
-                    metrics["rmse"],
-                    metrics.get("skill_score", float("nan")),
+                    mae,
+                    rmse,
+                    skill,
                     len(feature_cols_h),
                 )
+                results_summary.append(
+                    f"h{h} ({horizon_desc[h]}): MAE={mae:.0f} kW, skill={skill:.3f}"
+                )
+
+        # Re-collect child metrics to set summary on parent
+        active = mlflow.active_run()
+        parent_run_id = active.info.run_id if active else ""
+        client = mlflow.tracking.MlflowClient()  # pyright: ignore[reportPrivateImportUsage]
+        exp_obj = client.get_experiment_by_name(experiment_name)
+        if exp_obj and parent_run_id:
+            children = client.search_runs(
+                experiment_ids=[exp_obj.experiment_id],
+                filter_string=f"tags.mlflow.parentRunId = '{parent_run_id}'",
+            )
+            for child in children:
+                for k, v in child.data.metrics.items():
+                    if k.startswith("h") and ("_mae" in k or "_skill_score" in k):
+                        mlflow.log_metric(k, v)
+
+        summary_text = "\n".join(results_summary)
+        parent_desc = (
+            f"## {run_label.upper()} — {feature_set}\n\n"
+            f"**Dataset:** {dataset} | "
+            f"**Train:** {len(train_df):,} rows | "
+            f"**Val:** {len(val_df):,} rows\n\n"
+            f"### Feature Set\n{fs.description}\n\n"
+            f"### Results (validation set)\n{summary_text}\n"
+        )
+        mlflow.set_tag("mlflow.note.content", parent_desc)
 
     logger.info("Training complete! Check MLflow UI: %s", settings.mlflow_tracking_uri)
 
