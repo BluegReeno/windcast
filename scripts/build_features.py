@@ -3,6 +3,7 @@
 Usage:
     uv run python scripts/build_features.py [--feature-set wind_baseline]
     uv run python scripts/build_features.py --domain demand --feature-set demand_baseline
+    uv run python scripts/build_features.py --feature-set wind_full --weather-db data/weather.db
 """
 
 import argparse
@@ -11,7 +12,7 @@ from pathlib import Path
 
 import polars as pl
 
-from windcast.config import get_settings
+from windcast.config import DOMAIN_RESOLUTION, get_settings
 from windcast.features import (
     build_demand_features,
     build_solar_features,
@@ -54,6 +55,12 @@ def main() -> None:
         default=None,
         help="(Wind only) Process only this turbine (e.g., kwf1). Default: all turbines.",
     )
+    parser.add_argument(
+        "--weather-db",
+        type=Path,
+        default=None,
+        help="Path to weather SQLite cache. Enables NWP horizon features for *_full sets.",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -94,6 +101,44 @@ def main() -> None:
     logger.info("Found %d Parquet files in %s", len(parquet_files), input_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Load NWP weather data if requested
+    weather_df: pl.DataFrame | None = None
+    resolution_minutes = DOMAIN_RESOLUTION.get(args.domain, 60)
+    horizons = settings.forecast_horizons
+
+    if args.weather_db is not None:
+        from windcast.weather.registry import get_weather_config
+        from windcast.weather.storage import WeatherStorage
+
+        domain_weather_map = {
+            "wind": "kelmarsh",
+            "demand": "spain_demand",
+            "solar": "pvdaq_system4",
+        }
+        weather_name = domain_weather_map.get(args.domain)
+        if weather_name is None:
+            logger.warning("No weather config for domain %s", args.domain)
+        else:
+            wcfg = get_weather_config(weather_name)
+            storage = WeatherStorage(args.weather_db)
+            try:
+                coverage = storage.get_coverage(f"{wcfg.latitude}_{wcfg.longitude}")
+                if coverage is None:
+                    logger.error("No weather data in %s for %s", args.weather_db, weather_name)
+                else:
+                    start, end = coverage[0][:10], coverage[1][:10]
+                    weather_df = storage.query(
+                        f"{wcfg.latitude}_{wcfg.longitude}", start, end, wcfg.variables
+                    )
+                    logger.info(
+                        "Loaded NWP: %d rows, %d variables from %s",
+                        len(weather_df),
+                        len(weather_df.columns) - 1,
+                        args.weather_db,
+                    )
+            finally:
+                storage.close()
+
     for pq_file in parquet_files:
         logger.info("Processing %s", pq_file.name)
         df = pl.read_parquet(pq_file)
@@ -104,7 +149,13 @@ def main() -> None:
         elif args.domain == "solar":
             df = build_solar_features(df, feature_set=feature_set)
         else:
-            df = build_wind_features(df, feature_set=feature_set)
+            df = build_wind_features(
+                df,
+                feature_set=feature_set,
+                weather_df=weather_df,
+                horizons=horizons,
+                resolution_minutes=resolution_minutes,
+            )
 
         # Drop rows with nulls in feature columns (from lags/rolling at series start)
         df = df.drop_nulls()

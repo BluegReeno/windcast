@@ -17,6 +17,9 @@ DEFAULT_ROLLING_WINDOWS = [6, 12, 24]
 def build_wind_features(
     df: pl.DataFrame,
     feature_set: str = "wind_baseline",
+    weather_df: pl.DataFrame | None = None,
+    horizons: list[int] | None = None,
+    resolution_minutes: int = 10,
 ) -> pl.DataFrame:
     """Build wind features from SCADA DataFrame.
 
@@ -26,6 +29,10 @@ def build_wind_features(
     Args:
         df: Canonical SCADA DataFrame with qc_flag column.
         feature_set: Name of feature set from registry.
+        weather_df: Optional NWP DataFrame (timestamp_utc + variable columns).
+            Required for ``wind_full`` to populate NWP horizon features.
+        horizons: Forecast horizons in steps.  Required with *weather_df*.
+        resolution_minutes: Minutes per step (default 10 for wind SCADA).
 
     Returns:
         DataFrame with original columns + feature columns.
@@ -51,9 +58,22 @@ def build_wind_features(
         df = _add_wind_specific_features(df)
         df = _add_cyclic_hour(df)
 
-    # Full adds month + day-of-week cyclic
+    # Full adds NWP horizon features + month + day-of-week cyclic
     if feature_set == "wind_full":
         df = _add_cyclic_calendar(df)
+        if weather_df is not None and horizons is not None:
+            from windcast.features.weather import join_nwp_horizon_features
+
+            df = join_nwp_horizon_features(
+                df,
+                weather_df,
+                horizons=horizons,
+                resolution_minutes=resolution_minutes,
+            )
+        elif weather_df is None:
+            logger.warning(
+                "wind_full requested but no weather_df provided — NWP columns will be missing"
+            )
 
     logger.info("Feature engineering complete: %d columns", len(df.columns))
     return df

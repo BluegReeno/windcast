@@ -13,6 +13,7 @@ from windcast.features.registry import (
     list_feature_sets,
 )
 from windcast.features.solar import build_solar_features
+from windcast.features.weather import join_nwp_horizon_features
 from windcast.features.wind import build_wind_features
 
 __all__ = [
@@ -25,5 +26,6 @@ __all__ = [
     "build_wind_exogenous",
     "build_wind_features",
     "get_feature_set",
+    "join_nwp_horizon_features",
     "list_feature_sets",
 ]

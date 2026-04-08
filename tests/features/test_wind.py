@@ -188,3 +188,37 @@ class TestBuildWindFeatures:
         result = build_wind_features(df, "wind_baseline")
         turbines = result.get_column("turbine_id").unique().to_list()
         assert len(turbines) == 2
+
+    def test_wind_full_with_weather_df(self):
+        """wind_full with weather_df should produce NWP horizon columns."""
+        df = _make_wind_df(n_rows=200)
+        # Create matching NWP data (hourly, covering the SCADA range)
+        nwp = pl.DataFrame(
+            {
+                "timestamp_utc": [
+                    datetime(2021, 6, 15, tzinfo=UTC) + timedelta(hours=i) for i in range(48)
+                ],
+                "wind_speed_100m": [10.0 + 0.5 * i for i in range(48)],
+                "wind_direction_100m": [180.0 + i for i in range(48)],
+                "temperature_2m": [15.0 + 0.1 * i for i in range(48)],
+            }
+        )
+        horizons = [1, 6, 12]
+        result = build_wind_features(
+            df, "wind_full", weather_df=nwp, horizons=horizons, resolution_minutes=10
+        )
+        # Should have NWP columns for each horizon
+        assert "nwp_wind_speed_100m_h1" in result.columns
+        assert "nwp_wind_speed_100m_h6" in result.columns
+        assert "nwp_wind_speed_100m_h12" in result.columns
+        # Should also have calendar features from wind_full
+        assert "month_sin" in result.columns
+
+    def test_wind_full_without_weather_warns(self):
+        """wind_full without weather_df should still work (no NWP columns)."""
+        df = _make_wind_df(n_rows=200)
+        result = build_wind_features(df, "wind_full")
+        # Should have calendar features but no NWP columns
+        assert "month_sin" in result.columns
+        nwp_cols = [c for c in result.columns if c.startswith("nwp_")]
+        assert len(nwp_cols) == 0

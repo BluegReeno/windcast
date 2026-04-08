@@ -137,6 +137,14 @@ class SolarQCConfig(BaseModel):
     nighttime_power_threshold_kw: float = 0.01
 
 
+DOMAIN_RESOLUTION: dict[str, int] = {
+    "wind": 10,  # 10-min SCADA
+    "demand": 60,  # Hourly
+    "solar": 15,  # 15-min PVDAQ
+}
+"""Data resolution in minutes per domain. Used to convert horizon steps → timedelta."""
+
+
 class WindCastSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="WINDCAST_",
@@ -148,6 +156,7 @@ class WindCastSettings(BaseSettings):
     data_dir: Path = Path("data")
     dataset_id: str = "kelmarsh"
     domain: str = "wind"
+    data_resolution_minutes: int = 10
     train_years: int = 5
     val_years: int = 1
     test_years: int = 1

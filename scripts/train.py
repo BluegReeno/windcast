@@ -52,15 +52,54 @@ def _temporal_split(
     return train, val, test
 
 
+def _resolve_horizon_features(
+    available_cols: list[str],
+    feature_set_cols: list[str],
+    horizon: int,
+) -> tuple[list[str], dict[str, str]]:
+    """Resolve feature columns for a specific horizon.
+
+    For NWP columns (``nwp_*``), selects the ``_h{h}`` variant matching the
+    current horizon and excludes all other horizon variants.  Non-NWP columns
+    are passed through unchanged.
+
+    Returns:
+        ``(actual_columns, rename_map)`` — *actual_columns* are the DataFrame
+        column names to select; *rename_map* maps ``nwp_X_h{h}`` → ``nwp_X``
+        so the model sees consistent canonical names across horizons.
+    """
+    available_set = set(available_cols)
+    actual: list[str] = []
+    rename_map: dict[str, str] = {}
+
+    for col in feature_set_cols:
+        if col.startswith("nwp_"):
+            # Look for horizon-specific column nwp_X_h{h}
+            horizon_col = f"{col}_h{horizon}"
+            if horizon_col in available_set:
+                actual.append(horizon_col)
+                rename_map[horizon_col] = col
+            elif col in available_set:
+                # Fallback: use unsuffixed column (no horizon shifting)
+                actual.append(col)
+        elif col in available_set:
+            actual.append(col)
+
+    return actual, rename_map
+
+
 def _build_horizon_target(
     df: pl.DataFrame,
     horizon: int,
     feature_cols: list[str],
     target_col_name: str = "active_power_kw",
+    rename_map: dict[str, str] | None = None,
 ) -> tuple[pl.DataFrame, pl.Series]:
     """Build target for a given horizon and return X, y without nulls.
 
     Target at row i = target value at row i+horizon (shift(-h)).
+    If *rename_map* is provided, renames columns (e.g. strip ``_h{h}`` suffix)
+    so the model sees canonical feature names.
     """
     target_col = f"target_h{horizon}"
     df_h = df.with_columns(pl.col(target_col_name).shift(-horizon).alias(target_col)).drop_nulls(
@@ -68,6 +107,8 @@ def _build_horizon_target(
     )
 
     X = df_h.select(feature_cols)
+    if rename_map:
+        X = X.rename(rename_map)
     y = df_h.get_column(target_col)
     return X, y
 
@@ -157,11 +198,18 @@ def main() -> None:
     df = pl.read_parquet(parquet_path)
     logger.info("Loaded %d rows, %d columns", len(df), len(df.columns))
 
-    # Filter feature columns to those actually present in the data
-    available_cols = [c for c in fs.columns if c in df.columns]
-    missing_cols = set(fs.columns) - set(available_cols)
-    if missing_cols:
-        logger.warning("Missing feature columns (skipped): %s", sorted(missing_cols))
+    # Detect whether NWP horizon columns are present (nwp_*_h{h})
+    has_nwp_horizons = any(c for c in df.columns if c.startswith("nwp_") and "_h" in c)
+    if has_nwp_horizons:
+        logger.info("NWP horizon columns detected — will resolve per horizon")
+
+    # Filter non-NWP feature columns to those present in the data.
+    # NWP columns are resolved per-horizon in the training loop.
+    non_nwp_cols = [c for c in fs.columns if not c.startswith("nwp_")]
+    available_non_nwp = [c for c in non_nwp_cols if c in df.columns]
+    missing_non_nwp = set(non_nwp_cols) - set(available_non_nwp)
+    if missing_non_nwp:
+        logger.warning("Missing feature columns (skipped): %s", sorted(missing_non_nwp))
 
     # Temporal split
     train_df, val_df, test_df = _temporal_split(df, settings.train_years, settings.val_years)
@@ -206,7 +254,7 @@ def main() -> None:
                 "domain": domain,
                 "dataset": dataset,
                 "feature_set": feature_set,
-                "n_features": len(available_cols),
+                "n_features_base": len(available_non_nwp),
                 "horizons": str(horizons),
                 "n_train": len(train_df),
                 "n_val": len(val_df),
@@ -238,15 +286,30 @@ def main() -> None:
         for h in horizons:
             logger.info("=== Horizon h=%d ===", h)
 
-            X_train, y_train = _build_horizon_target(train_df, h, available_cols, target_col)
-            X_val, y_val = _build_horizon_target(val_df, h, available_cols, target_col)
+            # Resolve NWP columns for this specific horizon
+            if has_nwp_horizons:
+                h_cols, rename_map = _resolve_horizon_features(df.columns, fs.columns, h)
+                # Combine: non-NWP features + horizon-specific NWP features
+                feature_cols_h = [c for c in available_non_nwp if not c.startswith("nwp_")] + [
+                    c for c in h_cols if c.startswith("nwp_")
+                ]
+            else:
+                feature_cols_h = available_non_nwp + [
+                    c for c in fs.columns if c.startswith("nwp_") and c in df.columns
+                ]
+                rename_map = {}
+
+            X_train, y_train = _build_horizon_target(
+                train_df, h, feature_cols_h, target_col, rename_map
+            )
+            X_val, y_val = _build_horizon_target(val_df, h, feature_cols_h, target_col, rename_map)
 
             if len(X_train) == 0 or len(X_val) == 0:
                 logger.warning("Insufficient data for horizon %d, skipping", h)
                 continue
 
             with mlflow.start_run(run_name=f"h{h:02d}", nested=True):
-                mlflow.log_params({"horizon_steps": h})
+                mlflow.log_params({"horizon_steps": h, "n_features": len(feature_cols_h)})
 
                 # Train XGBoost
                 model = train_xgboost(X_train, y_train, X_val, y_val, config)
@@ -270,11 +333,12 @@ def main() -> None:
                 log_evaluation_results(metrics, horizon=h)
 
                 logger.info(
-                    "h=%d: MAE=%.1f, RMSE=%.1f, skill=%.3f",
+                    "h=%d: MAE=%.1f, RMSE=%.1f, skill=%.3f (%d features)",
                     h,
                     metrics["mae"],
                     metrics["rmse"],
                     metrics.get("skill_score", float("nan")),
+                    len(feature_cols_h),
                 )
 
     logger.info("Training complete! Check MLflow UI: %s", settings.mlflow_tracking_uri)
