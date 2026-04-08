@@ -1,5 +1,6 @@
 """Wind power forecasting models package."""
 
+from windcast.models.autogluon_model import AutoGluonConfig, train_autogluon
 from windcast.models.evaluation import (
     CustomMetric,
     compute_metrics,
@@ -19,6 +20,7 @@ from windcast.models.persistence import compute_persistence_metrics, persistence
 from windcast.models.xgboost_model import XGBoostConfig, train_multi_horizon, train_xgboost
 
 __all__ = [
+    "AutoGluonConfig",
     "CustomMetric",
     "MLForecastConfig",
     "XGBoostConfig",
@@ -32,6 +34,7 @@ __all__ = [
     "predict_mlforecast",
     "prepare_mlforecast_df",
     "regime_analysis",
+    "train_autogluon",
     "train_mlforecast",
     "train_multi_horizon",
     "train_xgboost",
