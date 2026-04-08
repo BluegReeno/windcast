@@ -16,7 +16,7 @@
 | Pass | Task | Input | Output | Done |
 |------|------|-------|--------|------|
 | 1 | **Ingest Kelmarsh** — run `ingest_kelmarsh.py` on real ZIP, fix any path issues | `data/KelmarshV4/16807551.zip` | `data/processed/kelmarsh_*.parquet` | [x] |
-| 2 | **Build features + train baseline** — run `build_features.py` then `train.py --feature-set wind_baseline` | `data/processed/` | `data/features/` + MLflow run | [ ] |
+| 2 | **Build features + train baseline** — run `build_features.py` then `train.py --feature-set wind_baseline` | `data/processed/` | `data/features/` + MLflow run | [x] |
 | 3 | **Train enriched + evaluate** — run `train.py --feature-set wind_enriched` then `evaluate.py` on both | MLflow runs | Skill scores, MAE per horizon, regime analysis | [ ] |
 | 4 | **mlforecast comparison** — run `train_mlforecast.py` on wind, compare with XGBoost in MLflow | `data/processed/` | XGBoost vs mlforecast metrics side by side | [ ] |
 
@@ -24,9 +24,9 @@
 
 **Wednesday exit criteria:**
 - [x] `data/processed/` has Kelmarsh Parquets (6 turbines, 473k rows each)
-- [ ] `data/features/` has feature Parquets
+- [x] `data/features/` has feature Parquets (6 turbines, 272k-318k rows, 29 cols)
 - [ ] MLflow has at least 2 wind runs (baseline + enriched) with real metrics
-- [ ] Skill score > 0 at h1 (model beats persistence)
+- [x] Skill score > 0 at h1 (model beats persistence) — skill=0.203, MAE=120 kW
 - [ ] Can articulate "roadmap to improve" based on actual results
 
 ### Thursday AM (2h = 4 passes) — Demand Domain
