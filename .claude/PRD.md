@@ -1,21 +1,23 @@
 # EnerCast — Product Requirements Document
 
-**Version**: 2.1
-**Last Updated**: 2026-04-02
-**Context**: ML framework for energy engineering professionals — demonstrated via WeatherNews challenge
-**Target**: Production-ready framework across 3 energy domains (Wind, Demand, Solar)
+**Version**: 2.2
+**Last Updated**: 2026-04-08
+**Context**: ML pipeline framework that handles the plumbing — so energy forecasting experts spend their time on accuracy, not boilerplate
+**Target**: Working framework across 3 energy domains (Wind, Demand, Solar), demonstrated via WeatherNews challenge
 
 ---
 
 ## 1. Executive Summary
 
-EnerCast is an ML framework for energy engineering professionals. It provides pre-built data connectors, canonical schemas, QC pipelines, baseline models, and experiment tracking — so domain experts can focus on what actually drives forecast accuracy: feature engineering, model selection, and domain-specific evaluation.
+EnerCast is the plumbing layer for energy forecasting ML. It handles data ingestion, schema validation, QC, experiment tracking, and evaluation — the mechanical work that every forecasting project needs but that doesn't improve accuracy. Domain experts keep full control over what actually drives accuracy: feature engineering, model selection, and client-specific evaluation.
 
-The framework follows a single pipeline pattern — parse, validate, QC, engineer features, train, evaluate, track — that works across fundamentally different energy forecasting domains: wind generation, power demand, and solar generation. Domain-specific code is limited to a parser (~100 lines) and a feature configuration.
+**The problem it solves:** Every hour an engineer spends writing QC scripts, debugging deployment artifacts, or rebuilding data pipelines is an hour NOT spent understanding the client's data. The biggest accuracy gains come from domain expertise and data understanding — not from plumbing code.
 
-EnerCast is demonstrated as a **technical case study for WeatherNews (WN)**, proving that standardizing the mechanical parts of the ML pipeline frees engineer time for what matters: understanding client-specific data and context. This directly addresses WN's core tension: *standardize to liberate brain time, without blocking innovation*.
+**How it works:** One pipeline pattern — parse, validate, QC, features, train, evaluate, track — that works across fundamentally different energy domains: wind generation, power demand, and solar generation. Domain-specific code is limited to a parser (~100 lines) and a feature configuration. Everything else is shared.
 
-**Key value proposition:** Engineers who know their domain (spot prices, wake effects, clearsky ratios) and know ML (XGBoost, feature engineering) get a framework where data plumbing, schemas, QC, and tracking are already done. They iterate on features, models, and KPIs — not on boilerplate.
+EnerCast is demonstrated as a **technical case study for WeatherNews (WN)**, proving that standardizing the plumbing frees engineer time for what matters: understanding client-specific data and context. This directly addresses WN's core tension: *standardize to free brain time, without blocking innovation*.
+
+**Key value proposition:** The framework solves the plumbing once. Engineers iterate on features, models, and KPIs — not on boilerplate. Adding a new client = write a parser (~100 lines) + choose a feature set. Everything else is ready.
 
 ---
 

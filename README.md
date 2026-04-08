@@ -1,28 +1,20 @@
 # EnerCast
 
-**ML framework for energy engineering professionals.** Pre-built pipelines, data connectors, schemas, and baseline models — so domain experts can focus on what drives accuracy: feature engineering, model selection, and result comparison.
+**The plumbing layer for energy forecasting ML.** Handles data ingestion, QC, schemas, experiment tracking, and evaluation — so domain experts spend their time on what actually improves accuracy: feature engineering, model selection, and understanding client data.
 
-EnerCast handles the mechanical parts (data ingestion, QC, experiment tracking) while giving full control over the parts that require domain expertise (feature sets, model configuration, custom KPIs).
+Every hour an engineer spends writing QC scripts, debugging deployment artifacts, or rebuilding data pipelines is an hour NOT spent on accuracy. EnerCast solves the plumbing once. Engineers iterate on features, models, and KPIs — not on boilerplate.
 
-## Who Is This For?
+## What the Framework Handles (Plumbing)
 
-Energy engineers and data scientists who:
-- **Know their domain** — spot price dynamics, wind farm performance assessment, solar degradation patterns
-- **Know ML** — comfortable with XGBoost, feature engineering, train/val/test splits
-- **Don't want to rebuild plumbing** — data connectors, schemas, QC rules, MLflow logging should be ready to use
-- **Need to iterate fast** — swap feature sets, compare models, test hypotheses in minutes, not days
-
-## What's Included
-
-| Layer | What You Get | What You Control |
-|-------|-------------|-----------------|
-| **Data connectors** | Parsers for SCADA, ENTSO-E, PVDAQ, Open-Meteo NWP | Add your own parser (~100 lines) |
+| Layer | What's Solved | What the Engineer Controls |
+|-------|--------------|---------------------------|
+| **Data ingestion** | Parsers for SCADA, ENTSO-E, PVDAQ, Open-Meteo NWP | Write a new parser (~100 lines) for a new dataset |
 | **Schemas** | Typed canonical schemas per domain (wind, demand, solar) | Extend with domain-specific fields |
 | **QC pipeline** | Parameterizable rules (outliers, gaps, frozen sensors, holidays) | Adjust thresholds per client/site |
 | **Feature sets** | Named sets (baseline / enriched / full) per domain | Modify features, create custom sets |
-| **Models** | XGBoost + persistence benchmark, ready to train | Swap to LightGBM, add new models |
-| **Evaluation** | MAE, RMSE, MAPE, skill scores, regime analysis | Add custom KPIs (e.g., "accuracy when spot > X") |
-| **Experiment tracking** | MLflow logs everything — features, params, metrics, artifacts | Compare across domains in one UI |
+| **Training** | Temporal splits, MLflow logging, multi-horizon training | Choose model (XGBoost, LightGBM, any sklearn-compatible), tune hyperparameters |
+| **Evaluation** | MAE, RMSE, MAPE, skill scores, regime analysis | Add custom KPIs (e.g., "accuracy when spot price > X") |
+| **Tracking** | MLflow logs everything — features, params, metrics, artifacts | Compare experiments across domains in one UI |
 
 ## Quick Start
 
@@ -36,8 +28,8 @@ uv run python scripts/build_features.py          # Feature engineering
 uv run python scripts/train.py                   # Train → MLflow
 uv run python scripts/evaluate.py                # Evaluate → MLflow
 
-# Demand pipeline (Spain ENTSO-E dataset)
-uv run python scripts/ingest_spain_demand.py     # Parse → QC → Parquet
+# Demand pipeline (Spain ENTSO-E dataset) — same scripts, different domain
+uv run python scripts/ingest_spain_demand.py
 uv run python scripts/build_features.py --domain demand --dataset spain_demand
 uv run python scripts/train.py --domain demand --dataset spain_demand
 uv run python scripts/evaluate.py --domain demand --dataset spain_demand
@@ -46,40 +38,23 @@ uv run python scripts/evaluate.py --domain demand --dataset spain_demand
 mlflow ui
 ```
 
+## Adding a New Client/Dataset
+
+1. Write a parser (~100 lines) that maps raw data to the domain schema
+2. Add a `DatasetConfig` in `config.py` (coordinates, capacity, timezone)
+3. Run the pipeline: `ingest → build_features → train → evaluate`
+
+Zero changes to the core pipeline. The parser is the only dataset-specific code.
+
 ## Domains
 
 | Domain | Dataset | Source | Resolution | What It Demonstrates |
 |--------|---------|--------|-----------|---------------------|
 | **Wind** | Kelmarsh v4 (6 turbines) | Zenodo | 10 min | SCADA ingestion, power curve modeling, NWP integration |
-| **Demand** | Spain ENTSO-E | Kaggle | 1 hour | Load forecasting, calendar features, price correlation |
-| **Solar** | PVDAQ System 2 | NREL | 15 min | Irradiance-based forecasting, clearsky ratio *(planned)* |
+| **Demand** | Spain ENTSO-E | Kaggle | 1 hour | Load forecasting, calendar features, MARS replacement |
+| **Solar** | PVDAQ System 4 | NREL | 15 min | Irradiance-based forecasting, clearsky ratio |
 
-Same pipeline pattern, different parsers and feature configs. Adding a new domain = writing a parser + feature set.
-
-## Project Structure
-
-```
-src/windcast/
-├── config.py                # Pydantic Settings + dataset configs
-├── data/                    # Data ingestion & QC
-│   ├── schema.py            # Wind SCADA schema (15 cols)
-│   ├── demand_schema.py     # Demand schema (11 cols)
-│   ├── kelmarsh.py          # Wind parser (Kelmarsh v4)
-│   ├── spain_demand.py      # Demand parser (ENTSO-E)
-│   ├── qc.py                # Wind QC (9 rules)
-│   ├── demand_qc.py         # Demand QC
-│   └── open_meteo.py        # NWP weather client (Open-Meteo)
-├── features/                # Feature engineering
-│   ├── registry.py          # Feature set registry (baseline/enriched/full)
-│   ├── wind.py              # Wind-specific features
-│   └── demand.py            # Demand-specific features
-├── models/                  # ML models (domain-agnostic)
-│   ├── xgboost_model.py     # XGBoost trainer
-│   ├── persistence.py       # Naive persistence benchmark
-│   └── evaluation.py        # Metrics, skill scores, regime analysis
-└── tracking/
-    └── mlflow_utils.py      # MLflow logging utilities
-```
+Same pipeline pattern, different parsers and feature configs.
 
 ## Pipeline Pattern
 
@@ -92,9 +67,50 @@ Raw data (CSV/ZIP/API)
     → [Evaluate] metrics + skill scores + regime analysis → MLflow artifacts
 ```
 
+**Framework zones** (grey — solved once): Parser scaffolding, schema validation, QC engine, temporal splits, MLflow logging, evaluation metrics.
+
+**Engineer zones** (blue — where accuracy comes from): Signal mapping, feature design, model choice, QC thresholds, custom KPIs, regime definitions.
+
+## Project Structure
+
+```
+src/windcast/
+├── config.py                # Pydantic Settings + dataset configs
+├── data/                    # Data ingestion & QC
+│   ├── schema.py            # Wind SCADA schema (15 cols)
+│   ├── demand_schema.py     # Demand schema (11 cols)
+│   ├── solar_schema.py      # Solar schema (10 cols)
+│   ├── kelmarsh.py          # Wind parser (Kelmarsh v4)
+│   ├── spain_demand.py      # Demand parser (ENTSO-E)
+│   ├── pvdaq.py             # Solar parser (PVDAQ)
+│   ├── qc.py                # Wind QC (9 rules)
+│   ├── demand_qc.py         # Demand QC
+│   ├── solar_qc.py          # Solar QC
+│   └── open_meteo.py        # NWP weather client (Open-Meteo)
+├── features/                # Feature engineering
+│   ├── registry.py          # Feature set registry (18 sets across 3 domains)
+│   ├── wind.py              # Wind-specific features
+│   ├── demand.py            # Demand-specific features
+│   └── solar.py             # Solar-specific features
+├── models/                  # ML models (domain-agnostic)
+│   ├── xgboost_model.py     # XGBoost trainer
+│   ├── mlforecast_model.py  # mlforecast (Nixtla) trainer
+│   ├── persistence.py       # Naive persistence benchmark
+│   └── evaluation.py        # Metrics, skill scores, regime analysis
+└── tracking/
+    └── mlflow_utils.py      # MLflow logging utilities
+```
+
 ## Tech Stack
 
-Python 3.12+ · uv · Polars · XGBoost · LightGBM · scikit-learn · MLflow · Optuna · Open-Meteo · pytest · ruff · pyright
+Python 3.12+ · uv · Polars · XGBoost · LightGBM · mlforecast (Nixtla) · scikit-learn · MLflow · Optuna · Open-Meteo · pytest · ruff · pyright
+
+## Quality
+
+- 234 tests passing
+- ruff lint + format clean
+- pyright type checking clean
+- Strict temporal train/val/test splits (no data leakage)
 
 ## Documentation
 
