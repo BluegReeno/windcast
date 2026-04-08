@@ -85,6 +85,7 @@ def train_autogluon(
         presets=config.presets,
         time_limit=config.time_limit,
         excluded_model_types=config.excluded_model_types,
+        use_bag_holdout=True,
     )
 
     # Re-enable autolog for other code

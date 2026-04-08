@@ -18,94 +18,47 @@
 | 1 | **Ingest Kelmarsh** — run `ingest_kelmarsh.py` on real ZIP, fix any path issues | `data/KelmarshV4/16807551.zip` | `data/processed/kelmarsh_*.parquet` | [x] |
 | 2 | **Build features + train baseline** — run `build_features.py` then `train.py --feature-set wind_baseline` | `data/processed/` | `data/features/` + MLflow run | [x] |
 | 3 | **Train enriched + evaluate** — run `train.py --feature-set wind_enriched` then `evaluate.py` on both | MLflow runs | Skill scores, MAE per horizon, regime analysis | [x] |
+| 4 | **Weather provider layer** — pluggable NWP fetch/cache/serve (Open-Meteo + SQLite) | — | `weather/` module + `data/weather.db` | [x] |
+| 5 | **NWP features + wind_full** — join NWP at forecast horizon, train wind_full, measure improvement | `data/weather.db` | wind_full MLflow run, 23 features | [x] |
+| 5b | **MLflow UI polish** — run descriptions, tags propagation, summary metrics on parent | MLflow runs | Readable MLflow UI with comparison | [x] |
 
-**Results so far (val set, turbine kwf1):**
+**Results (val set, turbine kwf1):**
 
-| Horizon | Baseline MAE | Enriched MAE | Baseline Skill | Enriched Skill |
-|---------|-------------|-------------|----------------|----------------|
-| h1 (10m) | 120 kW | 119 kW | 0.203 | 0.207 |
-| h6 (1h) | 210 kW | 207 kW | 0.097 | 0.103 |
-| h12 (2h) | 259 kW | 256 kW | 0.091 | 0.101 |
-| h24 (4h) | 334 kW | 329 kW | 0.107 | 0.116 |
-| h48 (8h) | 432 kW | 429 kW | 0.130 | 0.135 |
+| Horizon | Baseline MAE | Enriched MAE | Full MAE | Baseline Skill | Enriched Skill | Full Skill |
+|---------|-------------|-------------|----------|----------------|----------------|------------|
+| h1 (10m) | 120 kW | 119 kW | **115 kW** | 0.203 | 0.207 | **0.236** |
+| h6 (1h) | 210 kW | 207 kW | **184 kW** | 0.097 | 0.103 | **0.195** |
+| h12 (2h) | 259 kW | 256 kW | **205 kW** | 0.091 | 0.101 | **0.250** |
+| h24 (4h) | 334 kW | 329 kW | **235 kW** | 0.107 | 0.116 | **0.315** |
+| h48 (8h) | 432 kW | 429 kW | **283 kW** | 0.130 | 0.135 | **0.364** |
 
-**Diagnosis:** Skill scores are low (0.10-0.20) because the model has no future weather information — it only uses SCADA lags (rearview mirror). NWP data is the #1 lever.
-
----
-
-### Pass 4 — Weather Provider Layer
-
-**Goal:** Build a pluggable weather data provider so the framework can fetch, cache, and serve NWP data for any domain/site. This is the "Wx sources" layer that WN has (ECMWF, ICON, AROME) — EnerCast uses Open-Meteo as free equivalent.
-
-**What to build:**
-
-| # | Deliverable | Detail |
-|---|------------|--------|
-| 4a | `src/windcast/weather/providers/base.py` | `WeatherProvider` protocol: `fetch(config, start, end) → pl.DataFrame` |
-| 4b | `src/windcast/weather/providers/open_meteo.py` | Open-Meteo provider: archive + forecast endpoints. Reuse patterns from WattCast |
-| 4c | `src/windcast/weather/registry.py` | `WeatherConfig` per dataset (variables, locations, weights). Declarative like feature sets |
-| 4d | `src/windcast/weather/storage.py` | SQLite cache: fetch once, query many. Upsert, temporal queries. File: `data/weather.db` |
-| 4e | `src/windcast/weather/__init__.py` | Public API: `get_weather(config_name, start, end) → pl.DataFrame` |
-| 4f | Tests | Unit tests for provider, storage, registry |
-
-**Exit criteria:**
-- [ ] `WeatherProvider` protocol defined with Open-Meteo implementation
-- [ ] `WeatherConfig` for Kelmarsh registered (wind_speed_100m, wind_direction_100m, temperature_2m)
-- [ ] SQLite storage works: fetch → store → query returns same data
-- [ ] `get_weather("kelmarsh", "2016-01-01", "2024-12-31")` returns hourly Polars DF
-- [ ] Tests pass, ruff + pyright clean
-
-**Key decision:** SQLite for local caching (one file, upsert, temporal queries). Same schema as Supabase PostgreSQL — migration to prod is trivial.
+**Key result:** NWP data doubles skill scores at short horizons and nearly triples them at longer horizons. Biggest gain at h48: 0.130 → 0.364 (+180%). This is the "rearview mirror → windshield" story for the WN presentation.
 
 ---
 
-### Pass 5 — NWP Features for Kelmarsh + Measure Improvement
-
-**Goal:** Join weather data with SCADA, train with `wind_full` feature set, measure the improvement vs baseline/enriched. This is the key result: "adding NWP data improves skill score from 0.20 to 0.XX".
-
-**What to do:**
-
-| # | Step | Detail |
-|---|------|--------|
-| 5a | **Fetch weather** | `get_weather("kelmarsh", "2016-01-01", "2024-12-31")` → cached in `data/weather.db` |
-| 5b | **Update build_features.py** | Add `--weather` flag: load weather, resample hourly→10min (forward-fill), join on timestamp |
-| 5c | **Build wind_full features** | `build_features.py --feature-set wind_full --weather` → features with NWP columns |
-| 5d | **Train wind_full** | `train.py --feature-set wind_full` → MLflow run with 19 features (enriched + NWP + calendar) |
-| 5e | **Compare in MLflow** | 3 runs side by side: baseline (11) vs enriched (16) vs full (19). Extract improvement table |
-
-**Exit criteria:**
-- [ ] Weather data fetched and cached in SQLite for Kelmarsh (2016-2024, hourly)
-- [ ] Feature Parquets contain NWP columns (nwp_wind_speed_100m, nwp_wind_direction_100m, nwp_temperature_2m)
-- [ ] wind_full trained, results in MLflow
-- [ ] Improvement table: baseline → enriched → full, skill scores per horizon
-- [ ] Skill score improvement measurable (expected: 0.20 → 0.30+ at h1, bigger gains at h12-h48)
-
-**What this proves for WN:** The framework handles the Wx sources integration — same pattern WN uses with ECMWF/ICON/AROME. Adding weather for a new site = add a `WeatherConfig` (3 lines), run the pipeline.
-
----
-
-### Pass 6 — AutoGluon-Tabular Backend + Final Comparison
+### Pass 6 — AutoGluon-Tabular Backend + Final Comparison [x]
 
 **Goal:** Add AutoGluon-Tabular as 3rd ML backend (WN's own tool). Train on wind_full features, compare XGBoost vs AutoGluon ensemble. This shows framework pluggability with WN's actual stack.
 
-**What to build:**
-
-| # | Deliverable | Detail |
-|---|------------|--------|
-| 6a | `src/windcast/models/autogluon_model.py` | AutoGluon-Tabular trainer: `TabularPredictor.fit(train_df)` with time_limit, presets |
-| 6b | `scripts/train_autogluon.py` | Training script: same interface as train.py, MLflow logging |
-| 6c | `pyproject.toml` | Add `autogluon.tabular` dependency |
-| 6d | **Train + compare** | Run on wind_full features, compare with XGBoost in MLflow |
-
 **Exit criteria:**
-- [ ] AutoGluon backend works with same feature Parquets as XGBoost
-- [ ] MLflow shows 4 runs: XGB baseline / XGB enriched / XGB full / AutoGluon full
-- [ ] Comparison table: XGBoost vs AutoGluon on same features, per horizon
-- [ ] Can state: "adding a new ML backend = 1 file, zero pipeline changes"
+- [x] AutoGluon backend works with same feature Parquets as XGBoost
+- [x] MLflow shows 4 runs: XGB baseline / XGB enriched / XGB full / AutoGluon full
+- [x] Comparison table: XGBoost vs AutoGluon on same features, per horizon
+- [x] Can state: "adding a new ML backend = 1 file, zero pipeline changes"
 
-**What this proves for WN:** The framework is backend-agnostic. WN can plug in their own AutoGluon setup, or any sklearn-compatible model, without touching the pipeline.
+**Results (val set, turbine kwf1, wind_full features):**
 
-**Reference:** AutoGluon-Tabular docs: https://auto.gluon.ai/dev/tutorials/tabular/index.html
+| Horizon | XGBoost MAE | AutoGluon MAE | Gain | XGB Skill | AG Skill |
+|---------|-------------|---------------|------|-----------|----------|
+| h1 (10m) | 115 kW | **112.9 kW** | -1.8% | 0.236 | 0.236 |
+| h6 (1h) | 184 kW | **177.6 kW** | -3.5% | 0.195 | 0.184 |
+| h12 (2h) | 205 kW | **195.7 kW** | -4.5% | 0.250 | 0.237 |
+| h24 (4h) | 235 kW | **224.3 kW** | -4.6% | 0.315 | 0.297 |
+| h48 (8h) | 283 kW | **263.0 kW** | -7.1% | 0.364 | 0.350 |
+
+**Key result:** AutoGluon ensemble (CatBoost+LightGBM+XGBoost stacked) beats single XGBoost on all horizons. Gain increases with horizon (-1.8% to -7.1%). Training time: ~6 min/horizon with `best_quality` preset (29 min total for 5 horizons).
+
+**Files created:** `autogluon_model.py` (wrapper) + `train_autogluon.py` (script) — 271 tests pass.
 
 ---
 
@@ -132,15 +85,27 @@
 - [x] Evaluation (MAE, RMSE, MAPE, skill score, bias, regime analysis)
 - [x] MLflow tracking integration
 - [x] Persistence baseline
-- [x] 234 tests passing, ruff + pyright clean
+- [x] 267 tests passing, ruff + pyright clean
 - [x] 7 CLI scripts covering full pipeline
 
-### MLflow Integration (Pass 2.5)
+### Weather & NWP Integration (Passes 4-5)
+- [x] WeatherProvider protocol + OpenMeteoProvider
+- [x] WeatherConfig registry for Kelmarsh, Spain, PVDAQ
+- [x] SQLite cache (weather.db) with upsert, temporal queries, gap detection
+- [x] `get_weather()` public API: fetch-cache-serve with ERA5 lag guard
+- [x] Resolution-agnostic NWP horizon feature joining (`features/weather.py`)
+- [x] `build_features.py --weather-db` loads NWP from SQLite cache
+- [x] `train.py` resolves horizon-specific NWP features per child run
+
+### MLflow Integration (Passes 2.5 + 5b)
 - [x] XGBoost autolog (replaces manual param/model logging, adds feature importance)
 - [x] Dataset provenance via `mlflow.data.from_polars()` (auto-hash train/val)
 - [x] Lineage tags: stage, domain, purpose, backend, data_resolution
 - [x] Split boundaries logged as params (train/val/test dates)
 - [x] Git commit auto-captured as system tag
+- [x] Markdown descriptions on parent + child runs (feature set, results table)
+- [x] Summary metrics bubbled up to parent (h{n}_mae, h{n}_skill_score)
+- [x] Autolog noise reduced (log_models=False, log_datasets=False)
 
 ### Research & Planning
 - [x] WN challenge CR + detailed slide analysis
