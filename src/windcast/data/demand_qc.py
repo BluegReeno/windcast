@@ -30,17 +30,57 @@ SPAIN_HOLIDAYS: set[date] = {
     date(2018, 3, 30),
 }
 
-# DST transition dates (last Sunday of March/October) for 2015-2018
-DST_TRANSITION_DATES: set[date] = {
-    date(2015, 3, 29),
-    date(2015, 10, 25),
-    date(2016, 3, 27),
-    date(2016, 10, 30),
-    date(2017, 3, 26),
-    date(2017, 10, 29),
-    date(2018, 3, 25),
-    date(2018, 10, 28),
+# France public holidays (fixed + Easter-derived) for 2014-2024
+FRANCE_HOLIDAYS: set[date] = set()
+for _y in range(2014, 2025):
+    FRANCE_HOLIDAYS.update(
+        [
+            date(_y, 1, 1),  # Jour de l'an
+            date(_y, 5, 1),  # Fête du travail
+            date(_y, 5, 8),  # Victoire 1945
+            date(_y, 7, 14),  # Fête nationale
+            date(_y, 8, 15),  # Assomption
+            date(_y, 11, 1),  # Toussaint
+            date(_y, 11, 11),  # Armistice
+            date(_y, 12, 25),  # Noël
+        ]
+    )
+# Easter-derived: Lundi de Pâques, Jeudi Ascension, Lundi Pentecôte (2014-2024)
+FRANCE_HOLIDAYS.update(
+    [
+        date(2014, 4, 21), date(2014, 5, 29), date(2014, 6, 9),
+        date(2015, 4, 6),  date(2015, 5, 14), date(2015, 5, 25),
+        date(2016, 3, 28), date(2016, 5, 5),  date(2016, 5, 16),
+        date(2017, 4, 17), date(2017, 5, 25), date(2017, 6, 5),
+        date(2018, 4, 2),  date(2018, 5, 10), date(2018, 5, 21),
+        date(2019, 4, 22), date(2019, 5, 30), date(2019, 6, 10),
+        date(2020, 4, 13), date(2020, 5, 21), date(2020, 6, 1),
+        date(2021, 4, 5),  date(2021, 5, 13), date(2021, 5, 24),
+        date(2022, 4, 18), date(2022, 5, 26), date(2022, 6, 6),
+        date(2023, 4, 10), date(2023, 5, 18), date(2023, 5, 29),
+        date(2024, 4, 1),  date(2024, 5, 9),  date(2024, 5, 20),
+    ]
+)  # fmt: skip
+
+HOLIDAYS_BY_DATASET: dict[str, set[date]] = {
+    "spain_demand": SPAIN_HOLIDAYS,
+    "rte_france": FRANCE_HOLIDAYS,
 }
+
+# DST transition dates (last Sunday of March/October) — EU-wide, 2014-2024
+DST_TRANSITION_DATES: set[date] = {
+    date(2014, 3, 30), date(2014, 10, 26),
+    date(2015, 3, 29), date(2015, 10, 25),
+    date(2016, 3, 27), date(2016, 10, 30),
+    date(2017, 3, 26), date(2017, 10, 29),
+    date(2018, 3, 25), date(2018, 10, 28),
+    date(2019, 3, 31), date(2019, 10, 27),
+    date(2020, 3, 29), date(2020, 10, 25),
+    date(2021, 3, 28), date(2021, 10, 31),
+    date(2022, 3, 27), date(2022, 10, 30),
+    date(2023, 3, 26), date(2023, 10, 29),
+    date(2024, 3, 31), date(2024, 10, 27),
+}  # fmt: skip
 
 
 def run_demand_qc_pipeline(
@@ -113,8 +153,15 @@ def _flag_wind_outliers(df: pl.DataFrame, max_wind: float) -> pl.DataFrame:
 
 
 def _detect_holidays(df: pl.DataFrame) -> pl.DataFrame:
-    """Set is_holiday=True for Spain public holidays."""
-    holiday_dates = pl.Series("_holiday_dates", list(SPAIN_HOLIDAYS)).implode()
+    """Set is_holiday=True for the dataset's country public holidays."""
+    if len(df) == 0:
+        return df.with_columns(pl.lit(False).alias("is_holiday"))
+    dataset_id = df.get_column("dataset_id").head(1).to_list()[0]
+    holiday_set = HOLIDAYS_BY_DATASET.get(dataset_id, set())
+    if not holiday_set:
+        logger.warning("No holidays configured for dataset %s", dataset_id)
+        return df.with_columns(pl.lit(False).alias("is_holiday"))
+    holiday_dates = pl.Series("_holiday_dates", list(holiday_set)).implode()
     return df.with_columns(
         pl.col("timestamp_utc").dt.date().is_in(holiday_dates).alias("is_holiday")
     )

@@ -45,16 +45,21 @@ def build_demand_features(
     df = _add_lag_features(df, "load_mw", DEFAULT_LOAD_LAGS)
     df = _add_cyclic_calendar(df)
 
-    # Enriched adds temperature features + rolling stats
+    # Enriched adds rolling load stats + holiday flag (numeric)
     if feature_set in ("demand_enriched", "demand_full"):
-        df = _add_temperature_features(df)
         df = _add_rolling_features(df, "load_mw", DEFAULT_ROLLING_WINDOWS)
+        if "is_holiday" in df.columns:
+            df = df.with_columns(pl.col("is_holiday").cast(pl.Int8).alias("is_holiday"))
 
-    # Full adds weather, price, holiday
+    # Full adds HDD/CDD computed from the NWP temperature at the shortest horizon
+    # (or the observed temperature column as a fallback for legacy datasets).
     if feature_set == "demand_full":
-        df = _add_price_features(df)
-        # Cast is_holiday to numeric for XGBoost
-        df = df.with_columns(pl.col("is_holiday").cast(pl.Int8).alias("is_holiday"))
+        if "nwp_temperature_2m_h1" in df.columns:
+            df = _add_temperature_features(df, source_col="nwp_temperature_2m_h1")
+        elif "temperature_c" in df.columns and df["temperature_c"].drop_nulls().len() > 0:
+            df = _add_temperature_features(df, source_col="temperature_c")
+        else:
+            logger.warning("No temperature source for HDD/CDD — skipping")
 
     logger.info("Feature engineering complete: %d columns", len(df.columns))
     return df
@@ -124,13 +129,19 @@ def _add_cyclic_calendar(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def _add_temperature_features(df: pl.DataFrame) -> pl.DataFrame:
-    """Add heating degree days (HDD) and cooling degree days (CDD)."""
+def _add_temperature_features(
+    df: pl.DataFrame,
+    source_col: str = "temperature_c",
+) -> pl.DataFrame:
+    """Add heating degree days (HDD) and cooling degree days (CDD) from the given column."""
+    if source_col not in df.columns:
+        logger.warning("HDD/CDD source column %s missing, skipping", source_col)
+        return df
     return df.with_columns(
-        pl.max_horizontal(pl.lit(0.0), pl.lit(18.0) - pl.col("temperature_c")).alias(
+        pl.max_horizontal(pl.lit(0.0), pl.lit(18.0) - pl.col(source_col)).alias(
             "heating_degree_days"
         ),
-        pl.max_horizontal(pl.lit(0.0), pl.col("temperature_c") - pl.lit(24.0)).alias(
+        pl.max_horizontal(pl.lit(0.0), pl.col(source_col) - pl.lit(24.0)).alias(
             "cooling_degree_days"
         ),
     )

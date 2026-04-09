@@ -79,28 +79,25 @@ DEMAND_ENRICHED = FeatureSet(
     name="demand_enriched",
     columns=[
         *DEMAND_BASELINE.columns,
-        "temperature_c",
-        "heating_degree_days",
-        "cooling_degree_days",
         "load_mw_roll_mean_24",
         "load_mw_roll_std_24",
         "load_mw_roll_mean_168",
+        "is_holiday",
     ],
-    description="Demand enriched: + temperature, HDD/CDD, rolling load stats",
+    description="Demand enriched: baseline + rolling load stats + holiday flag (no weather)",
 )
 
 DEMAND_FULL = FeatureSet(
     name="demand_full",
     columns=[
         *DEMAND_ENRICHED.columns,
-        "wind_speed_ms",
-        "humidity_pct",
-        "price_eur_mwh",
-        "price_lag1",
-        "price_lag24",
-        "is_holiday",
+        "nwp_temperature_2m",
+        "nwp_wind_speed_10m",
+        "nwp_relative_humidity_2m",
+        "heating_degree_days",
+        "cooling_degree_days",
     ],
-    description="Demand full: + wind, humidity, price lags, holiday flag",
+    description="Demand full: enriched + NWP at horizon + HDD/CDD from NWP (operational)",
 )
 
 SOLAR_BASELINE = FeatureSet(

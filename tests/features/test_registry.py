@@ -62,14 +62,18 @@ class TestDemandFeatureSets:
         enriched = get_feature_set("demand_enriched")
         for col in baseline.columns:
             assert col in enriched.columns, f"{col} missing from demand_enriched"
-        assert "heating_degree_days" in enriched.columns
+        # Enriched now adds rolling load stats + holiday flag (no weather).
+        assert "load_mw_roll_mean_24" in enriched.columns
+        assert "is_holiday" in enriched.columns
 
     def test_demand_full_extends_enriched(self):
         enriched = get_feature_set("demand_enriched")
         full = get_feature_set("demand_full")
         for col in enriched.columns:
             assert col in full.columns, f"{col} missing from demand_full"
-        assert "price_lag1" in full.columns
+        # Full now sources weather from forward-looking NWP at horizon.
+        assert "nwp_temperature_2m" in full.columns
+        assert "heating_degree_days" in full.columns
 
     def test_list_includes_demand(self):
         names = list_feature_sets()

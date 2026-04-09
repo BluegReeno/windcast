@@ -187,10 +187,8 @@ def main() -> None:
     experiment_name = args.experiment_name or f"enercast-{dataset}"
 
     # Resolve feature file path
-    if domain == "demand":
-        parquet_path = features_dir / "spain_demand_features.parquet"
-    elif domain == "solar":
-        parquet_path = features_dir / "pvdaq_system4_features.parquet"
+    if domain in ("demand", "solar"):
+        parquet_path = features_dir / f"{dataset}_features.parquet"
     else:
         parquet_path = features_dir / f"kelmarsh_{args.turbine_id}.parquet"
 

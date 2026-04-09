@@ -10,18 +10,25 @@ import polars as pl
 
 from windcast.weather.provider import OpenMeteoProvider, WeatherProvider
 from windcast.weather.registry import (
+    AnyWeatherConfig,
     WeatherConfig,
+    WeatherPoint,
+    WeightedWeatherConfig,
     get_weather_config,
     list_weather_configs,
 )
 from windcast.weather.storage import WeatherStorage
 
 __all__ = [
+    "AnyWeatherConfig",
     "WeatherConfig",
+    "WeatherPoint",
     "WeatherProvider",
     "WeatherStorage",
+    "WeightedWeatherConfig",
     "get_weather",
     "get_weather_config",
+    "get_weather_weighted",
     "list_weather_configs",
 ]
 
@@ -63,10 +70,13 @@ def get_weather(
 ) -> pl.DataFrame:
     """Fetch weather data for a registered config, with SQLite caching.
 
-    1. Check SQLite cache for existing coverage
-    2. Fetch only missing date ranges from provider
-    3. Upsert new data into cache
-    4. Return full requested range from cache
+    Dispatches on config type:
+
+    - :class:`WeatherConfig` (single-point): returns variable columns for one
+      lat/lon, as cached in the SQLite store.
+    - :class:`WeightedWeatherConfig` (multi-point): fetches each point, then
+      returns a population-weighted national mean DataFrame — one row per
+      timestamp, one column per variable.
 
     Args:
         config_name: Registered weather config name (e.g., "kelmarsh").
@@ -84,6 +94,9 @@ def get_weather(
     if provider is None:
         provider = OpenMeteoProvider()
 
+    if isinstance(config, WeightedWeatherConfig):
+        return get_weather_weighted(config, start_date, end_date, db_path, provider)
+
     storage = WeatherStorage(db_path)
     loc_key = _location_key(config)
 
@@ -92,6 +105,93 @@ def get_weather(
         return storage.query(loc_key, start_date, end_date, config.variables)
     finally:
         storage.close()
+
+
+def get_weather_weighted(
+    config: WeightedWeatherConfig,
+    start_date: str,
+    end_date: str,
+    db_path: Path = DEFAULT_DB_PATH,
+    provider: WeatherProvider | None = None,
+) -> pl.DataFrame:
+    """Fetch a multi-point config and return a weighted national DataFrame.
+
+    Each point is cached independently under its own ``{lat}_{lon}`` location
+    key, so subsequent calls hit the cache. The result is the weight-normalised
+    sum across points per timestamp, per variable — the same pattern as
+    wattcast's ``compute_national_temperature``.
+    """
+    if provider is None:
+        provider = OpenMeteoProvider()
+    end_date = _clamp_end_date(end_date)
+
+    storage = WeatherStorage(db_path)
+    per_point_dfs: list[tuple[float, pl.DataFrame]] = []
+
+    try:
+        for point in config.points:
+            # Build a single-point WeatherConfig stub to reuse _fetch_missing.
+            point_cfg = WeatherConfig(
+                name=f"{config.name}:{point.name}",
+                latitude=point.latitude,
+                longitude=point.longitude,
+                variables=config.variables,
+            )
+            loc_key = _location_key(point_cfg)
+            _fetch_missing(storage, provider, point_cfg, loc_key, start_date, end_date)
+            df = storage.query(loc_key, start_date, end_date, config.variables)
+            if df.is_empty():
+                logger.warning(
+                    "Empty NWP slice for point %s (%s,%s)",
+                    point.name,
+                    point.latitude,
+                    point.longitude,
+                )
+                continue
+            per_point_dfs.append((point.weight, df))
+    finally:
+        storage.close()
+
+    if not per_point_dfs:
+        logger.warning("No NWP data fetched for any point in %s", config.name)
+        return pl.DataFrame(schema={"timestamp_utc": pl.Datetime("us", "UTC")})
+
+    return _weighted_mean(per_point_dfs, config.variables)
+
+
+def _weighted_mean(
+    per_point_dfs: list[tuple[float, pl.DataFrame]],
+    variables: list[str],
+) -> pl.DataFrame:
+    """Combine per-point DataFrames into a single weighted-mean wide DataFrame.
+
+    Each input frame must have ``timestamp_utc`` + variable columns. Missing
+    values are handled per (timestamp, variable): weights are renormalised over
+    only the points that contributed a value, so gaps in one city don't bias
+    the national mean.
+    """
+    # Label each frame by point index, stack vertically
+    labelled: list[pl.DataFrame] = []
+    for idx, (weight, df) in enumerate(per_point_dfs):
+        labelled.append(
+            df.with_columns(
+                pl.lit(idx).alias("_point_idx"),
+                pl.lit(weight).alias("_w"),
+            )
+        )
+    stacked = pl.concat(labelled, how="vertical_relaxed")
+
+    # For each (timestamp, variable), compute sum(w*x) / sum(w) ignoring null x
+    agg_exprs = []
+    for var in variables:
+        if var not in stacked.columns:
+            continue
+        weighted_val = (pl.col("_w") * pl.col(var)).filter(pl.col(var).is_not_null()).sum()
+        weight_sum = pl.col("_w").filter(pl.col(var).is_not_null()).sum()
+        agg_exprs.append((weighted_val / weight_sum).alias(var))
+
+    national = stacked.group_by("timestamp_utc").agg(*agg_exprs).sort("timestamp_utc")
+    return national
 
 
 def _fetch_missing(

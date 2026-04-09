@@ -70,6 +70,15 @@ SPAIN_DEMAND = DemandDatasetConfig(
     timezone="Europe/Madrid",
 )
 
+RTE_FRANCE = DemandDatasetConfig(
+    dataset_id="rte_france",
+    zone_id="FR",
+    population=68_000_000,
+    latitude=48.8566,  # Paris
+    longitude=2.3522,
+    timezone="Europe/Paris",
+)
+
 
 class SolarDatasetConfig(BaseModel):
     """Per-dataset metadata for solar PV forecasting."""
@@ -100,6 +109,7 @@ DATASETS: dict[str, DatasetConfig | DemandDatasetConfig | SolarDatasetConfig] = 
     "hill_of_towie": HILL_OF_TOWIE,
     "penmanshiel": PENMANSHIEL,
     "spain_demand": SPAIN_DEMAND,
+    "rte_france": RTE_FRANCE,
     "pvdaq_system4": PVDAQ_SYSTEM4,
 }
 
@@ -117,7 +127,7 @@ class QCConfig(BaseModel):
 class DemandQCConfig(BaseModel):
     """QC thresholds for demand data."""
 
-    max_load_mw: float = 50_000.0
+    max_load_mw: float = 100_000.0  # France peak is ~90 GW; 100 GW headroom covers Spain too
     min_load_mw: float = 10_000.0
     max_temperature_c: float = 50.0
     min_temperature_c: float = -20.0

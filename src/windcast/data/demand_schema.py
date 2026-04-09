@@ -24,6 +24,7 @@ DEMAND_SCHEMA: dict[str, type[pl.DataType] | pl.DataType] = {
     "wind_speed_ms": pl.Float64,
     "humidity_pct": pl.Float64,
     "price_eur_mwh": pl.Float64,
+    "tso_forecast_mw": pl.Float64,
     "is_holiday": pl.Boolean,
     "is_dst_transition": pl.Boolean,
     "qc_flag": pl.UInt8,
@@ -37,6 +38,7 @@ DEMAND_SIGNAL_COLUMNS: list[str] = [
     "wind_speed_ms",
     "humidity_pct",
     "price_eur_mwh",
+    "tso_forecast_mw",
 ]
 
 

@@ -12,10 +12,11 @@ from windcast.data.demand_schema import (
 
 
 def test_demand_schema_has_expected_columns():
-    """Schema defines all 11 canonical columns."""
-    assert len(DEMAND_SCHEMA) == 11
+    """Schema defines all 12 canonical columns."""
+    assert len(DEMAND_SCHEMA) == 12
     assert "timestamp_utc" in DEMAND_SCHEMA
     assert "load_mw" in DEMAND_SCHEMA
+    assert "tso_forecast_mw" in DEMAND_SCHEMA
     assert "qc_flag" in DEMAND_SCHEMA
 
 
@@ -24,7 +25,7 @@ def test_empty_demand_frame_matches_schema():
     df = empty_demand_frame()
     errors = validate_demand_schema(df)
     assert errors == []
-    assert df.shape == (0, 11)
+    assert df.shape == (0, 12)
 
 
 def test_validate_demand_schema_detects_missing_column():
@@ -55,10 +56,11 @@ def test_demand_columns_ordered():
 
 
 def test_demand_signal_columns():
-    """Signal columns are the 5 numeric measurement columns."""
-    assert len(DEMAND_SIGNAL_COLUMNS) == 5
+    """Signal columns are the 6 numeric measurement columns."""
+    assert len(DEMAND_SIGNAL_COLUMNS) == 6
     assert "load_mw" in DEMAND_SIGNAL_COLUMNS
     assert "temperature_c" in DEMAND_SIGNAL_COLUMNS
     assert "wind_speed_ms" in DEMAND_SIGNAL_COLUMNS
     assert "humidity_pct" in DEMAND_SIGNAL_COLUMNS
     assert "price_eur_mwh" in DEMAND_SIGNAL_COLUMNS
+    assert "tso_forecast_mw" in DEMAND_SIGNAL_COLUMNS

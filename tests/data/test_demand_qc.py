@@ -51,6 +51,15 @@ def _make_demand_df(n_rows: int = 24, **overrides) -> pl.DataFrame:
     )
 
 
+def _make_rte_df(n_rows: int = 3, **overrides) -> pl.DataFrame:
+    """Minimal demand DataFrame tagged as rte_france for holiday dispatch tests."""
+    df = _make_demand_df(n_rows, **overrides)
+    return df.with_columns(
+        pl.lit("rte_france").alias("dataset_id"),
+        pl.lit("FR").alias("zone_id"),
+    )
+
+
 class TestFlagLoadOutliers:
     def test_negative_load_flagged_bad(self):
         df = _make_demand_df(3, load_mw=[25000.0, -100.0, 25000.0])
@@ -124,6 +133,44 @@ class TestDetectHolidays:
         result = _detect_holidays(df)
         assert not any(result["is_holiday"].to_list())
 
+    def test_france_bastille_day_detected(self):
+        """2023-07-14 (Fête nationale) is a holiday for rte_france only."""
+        df = _make_rte_df(
+            2,
+            timestamp_utc=[
+                datetime(2023, 7, 14, 12, tzinfo=UTC),
+                datetime(2023, 7, 15, 12, tzinfo=UTC),
+            ],
+        )
+        result = _detect_holidays(df)
+        assert result["is_holiday"][0] is True
+        assert result["is_holiday"][1] is False
+
+    def test_france_easter_monday_detected(self):
+        """Lundi de Pâques 2023-04-10 is an Easter-derived holiday."""
+        df = _make_rte_df(
+            1,
+            timestamp_utc=[datetime(2023, 4, 10, 8, tzinfo=UTC)],
+        )
+        result = _detect_holidays(df)
+        assert result["is_holiday"][0] is True
+
+    def test_spain_dataset_does_not_detect_french_holiday(self):
+        """Bastille Day is not a Spanish holiday — dispatch must be by dataset_id."""
+        df = _make_demand_df(
+            1,
+            timestamp_utc=[datetime(2015, 7, 14, 12, tzinfo=UTC)],
+        )
+        result = _detect_holidays(df)
+        assert result["is_holiday"][0] is False
+
+    def test_empty_dataframe_does_not_crash(self):
+        """Holiday detector must tolerate empty input."""
+        df = _make_demand_df(0)
+        result = _detect_holidays(df)
+        assert "is_holiday" in result.columns
+        assert len(result) == 0
+
 
 class TestDetectDstTransitions:
     def test_march_dst_detected(self):
@@ -174,7 +221,8 @@ class TestRunDemandQcPipeline:
         assert "qc_flag" in result.columns
 
     def test_worst_flag_wins(self):
-        df = _make_demand_df(3, load_mw=[-100.0, 25000.0, 55000.0])
+        # 120,000 MW exceeds the 100,000 MW default cap → QC_SUSPECT
+        df = _make_demand_df(3, load_mw=[-100.0, 25000.0, 120000.0])
         result = run_demand_qc_pipeline(df)
         assert result["qc_flag"][0] == QC_BAD
         assert result["qc_flag"][2] == QC_SUSPECT

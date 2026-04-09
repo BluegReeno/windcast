@@ -169,16 +169,41 @@ class TestBuildDemandFeatures:
         assert "dow_cos" in result.columns
 
     def test_enriched_extends_baseline(self):
+        """Enriched adds rolling stats + holiday flag; no weather yet."""
         df = _make_demand_df(n_rows=200)
         result = build_demand_features(df, "demand_enriched")
+        assert "load_mw_roll_mean_24" in result.columns
+        assert "load_mw_roll_mean_168" in result.columns
+        assert "load_mw_lag1" in result.columns
+        assert "is_holiday" in result.columns
+        # HDD/CDD belong to `demand_full`, not `demand_enriched`
+        assert "heating_degree_days" not in result.columns
+        assert "cooling_degree_days" not in result.columns
+
+    def test_full_uses_nwp_for_hdd_cdd(self):
+        """demand_full computes HDD/CDD from nwp_temperature_2m_h1 when present."""
+        df = _make_demand_df(n_rows=200)
+        df = df.with_columns(
+            pl.Series("nwp_temperature_2m_h1", [10.0] * 200),
+        )
+        result = build_demand_features(df, "demand_full")
         assert "heating_degree_days" in result.columns
         assert "cooling_degree_days" in result.columns
-        assert "load_mw_roll_mean_24" in result.columns
-        assert "load_mw_lag1" in result.columns
+        # 18 - 10 = 8 heating degree days
+        assert result["heating_degree_days"][0] == 8.0
+        assert result["cooling_degree_days"][0] == 0.0
 
-    def test_full_has_price_and_holiday(self):
+    def test_full_falls_back_to_observed_temperature(self):
+        """Without NWP columns, demand_full falls back to the observed temperature_c."""
+        df = _make_demand_df(n_rows=200)
+        # Force a constant cold observed temperature
+        df = df.with_columns(pl.lit(5.0).alias("temperature_c"))
+        result = build_demand_features(df, "demand_full")
+        assert "heating_degree_days" in result.columns
+        # 18 - 5 = 13 heating degree days
+        assert result["heating_degree_days"][0] == 13.0
+
+    def test_full_has_holiday_flag(self):
         df = _make_demand_df(n_rows=200)
         result = build_demand_features(df, "demand_full")
-        assert "price_lag1" in result.columns
-        assert "price_lag24" in result.columns
         assert "is_holiday" in result.columns

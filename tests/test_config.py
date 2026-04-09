@@ -53,7 +53,7 @@ def test_spain_demand_config_values():
 def test_demand_qc_defaults():
     """DemandQCConfig has sensible defaults."""
     qc = DemandQCConfig()
-    assert qc.max_load_mw == 50_000.0
+    assert qc.max_load_mw == 100_000.0  # covers France peak ~90 GW
     assert qc.min_load_mw == 10_000.0
     assert qc.max_gap_fill_hours == 3
 
