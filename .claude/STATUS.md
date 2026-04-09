@@ -139,6 +139,7 @@
 Generated charts: `reports/comparison_enercast-kelmarsh_mae.png` and `reports/comparison_enercast-kelmarsh_skill.png` — ready for slides.
 
 ### Planned Improvements (post-presentation)
+- [x] **Stepped horizon metrics for native MLflow line charts** ✓ 2026-04-09 — `log_evaluation_results` also logs `mae_by_horizon_min` / `rmse_by_horizon_min` / `skill_score_by_horizon_min` / `bias_by_horizon_min` with `step=minutes_ahead`, unlocking MLflow's native "metric vs horizon" line chart out of the box. Flat `h{n}_*` metrics preserved. Recipe: `docs/mlflow-ui-setup.md#native-line-charts-metric-vs-horizon`.
 - [ ] `mlflow.evaluate()` — replace manual evaluation with MLflow's eval framework (auto residual plots, SHAP, R²). Keep custom skill_score + regime_analysis via `extra_metrics`
 - [ ] AutoGluon-TimeSeries — 4th backend, ensemble of DeepAR/TFT/Chronos/XGBoost, probabilistic forecasts
 

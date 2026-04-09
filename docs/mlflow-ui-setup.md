@@ -56,6 +56,51 @@ once and it survives across UI restarts.
 6. Pin the chart configuration using the bookmark icon so it survives UI
    restarts.
 
+## Native line charts: metric vs horizon
+
+EnerCast training scripts log every per-horizon metric **twice**:
+
+1. As a **flat** metric prefixed by horizon step — `h1_mae`, `h6_mae`, … —
+   which is queryable via `search_runs(filter_string=...)` and feeds
+   `scripts/compare_runs.py`.
+2. As a **stepped** metric under a canonical name (e.g. `mae_by_horizon_min`)
+   with `step = h * data_resolution` — i.e. the integer number of minutes
+   ahead of forecast time. MLflow's Line-chart widget auto-detects stepped
+   metrics and plots X=step, Y=value, one line per run, with zero config.
+
+This gives you the "MAE as a function of horizon" view natively in the UI,
+without manually configuring five bar charts (one per horizon) or depending
+on the programmatic PNG export below.
+
+### Stepped metric names
+
+| Stepped name | Raw source | Unit |
+|--------------|------------|------|
+| `mae_by_horizon_min` | `mae` | kW / MW / EUR·MWh⁻¹ (domain-dependent) |
+| `rmse_by_horizon_min` | `rmse` | same |
+| `bias_by_horizon_min` | `bias` | same (signed) |
+| `skill_score_by_horizon_min` | `skill_score` | unitless, 1 = perfect |
+| `persistence_mae_by_horizon_min` | `persistence_mae` | same as MAE (baseline) |
+
+The step unit is `minutes_ahead`, which is the only unit consistent across
+wind (10 min resolution), demand (60 min), solar (15 min), and the planned
+price domain (60 min intraday + 720-2160 min D+1). A single line chart named
+`mae_by_horizon_min` therefore compares seamlessly across domains once their
+units are the same (e.g. all-wind comparisons within `enercast-kelmarsh`).
+
+### Recipe
+
+1. Open an experiment with runs trained **after** the stepped-logging
+   feature landed (2026-04-09 onwards).
+2. Charts tab → **Add chart** → **Line chart**.
+3. Metric: `mae_by_horizon_min` (or any stepped sibling).
+4. X axis auto-detects `step` → displayed in minutes ahead.
+5. Each nested child run becomes one point on the chart; parent runs are
+   omitted because stepped metrics live on children only (nested-run
+   semantics).
+
+Pin the chart via the bookmark icon to persist the layout across UI restarts.
+
 ## Alternative: programmatic comparison
 
 For slide-ready PNG charts that do not depend on the UI, use
@@ -99,3 +144,8 @@ fails; ``tags.`enercast.run_type` = 'parent'`` works.
 bubbled up from child runs via `client.search_runs` at the end of training.
 Older runs predating this logic will not have those metrics on the parent —
 look at the child runs instead, or refer to the historical CSV snapshot.
+
+**Empty `mae_by_horizon_min` line chart** — the stepped metrics only exist
+for runs trained after the feature landed (2026-04-09). Older runs only
+have the flat `h{n}_mae` bar-chart metrics; re-run training to populate the
+stepped line chart, or fall back to the bar-chart-per-horizon recipe above.

@@ -353,7 +353,7 @@ def main() -> None:
                 else:
                     metrics = compute_metrics(y_val.to_numpy(), y_pred)
 
-                log_evaluation_results(metrics, horizon=h)
+                log_evaluation_results(metrics, horizon=h, horizon_minutes=h * data_resolution)
 
                 # Log AutoGluon leaderboard as artifact
                 lb = predictor.leaderboard(data=None, silent=True)
