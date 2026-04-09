@@ -1,4 +1,4 @@
-"""Tests for windcast.tracking.mlflow_utils.log_evaluation_results."""
+"""Tests for windcast.tracking.mlflow_utils metric logging helpers."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import mlflow
 import pytest
 from mlflow.tracking import MlflowClient
 
-from windcast.tracking import log_evaluation_results
+from windcast.tracking import log_evaluation_results, log_stepped_horizon_metrics
 from windcast.tracking.mlflow_utils import STEPPED_METRIC_MAP
 
 
@@ -40,15 +40,14 @@ def _base_metrics() -> dict[str, float]:
     }
 
 
-class TestLogEvaluationResultsLegacyMode:
-    """Legacy path: only ``horizon`` given, no ``horizon_minutes``."""
+class TestLogEvaluationResults:
+    """``log_evaluation_results`` is the flat-metrics path."""
 
-    def test_flat_metrics_present_stepped_absent(self, isolated_mlflow):
+    def test_flat_metrics_with_horizon_prefix(self, isolated_mlflow):
         client, _ = isolated_mlflow
-        metrics = _base_metrics()
 
         with mlflow.start_run() as run:
-            log_evaluation_results(metrics, horizon=6)
+            log_evaluation_results(_base_metrics(), horizon=6)
             run_id = run.info.run_id
 
         run_data = client.get_run(run_id).data.metrics
@@ -57,63 +56,49 @@ class TestLogEvaluationResultsLegacyMode:
         assert run_data["h6_bias"] == pytest.approx(-4.2)
         assert run_data["h6_skill_score"] == pytest.approx(0.234)
 
-        # Stepped metrics must NOT appear when horizon_minutes is None
-        for stepped_name in STEPPED_METRIC_MAP.values():
-            assert stepped_name not in run_data, (
-                f"Stepped metric {stepped_name!r} leaked into legacy path"
-            )
-
-
-class TestLogEvaluationResultsSteppedMode:
-    """Stepped path: both ``horizon`` and ``horizon_minutes`` given."""
-
-    def test_flat_and_stepped_metrics_both_logged(self, isolated_mlflow):
+    def test_flat_metrics_without_horizon(self, isolated_mlflow):
         client, _ = isolated_mlflow
-        metrics = _base_metrics()
 
         with mlflow.start_run() as run:
-            log_evaluation_results(metrics, horizon=6, horizon_minutes=60)
+            log_evaluation_results({"mae": 100.0, "rmse": 150.0})
             run_id = run.info.run_id
 
         run_data = client.get_run(run_id).data.metrics
-        # Flat path still fires
-        assert run_data["h6_mae"] == pytest.approx(120.5)
-        assert run_data["h6_rmse"] == pytest.approx(180.3)
+        assert run_data["mae"] == pytest.approx(100.0)
+        assert run_data["rmse"] == pytest.approx(150.0)
 
-        # Stepped path fires with step=60
-        mae_history = client.get_metric_history(run_id, "mae_by_horizon_min")
-        assert [m.step for m in mae_history] == [60]
-        assert mae_history[0].value == pytest.approx(120.5)
-
-        rmse_history = client.get_metric_history(run_id, "rmse_by_horizon_min")
-        assert [m.step for m in rmse_history] == [60]
-        assert rmse_history[0].value == pytest.approx(180.3)
-
-        bias_history = client.get_metric_history(run_id, "bias_by_horizon_min")
-        assert [m.step for m in bias_history] == [60]
-
-        skill_history = client.get_metric_history(run_id, "skill_score_by_horizon_min")
-        assert [m.step for m in skill_history] == [60]
-        assert skill_history[0].value == pytest.approx(0.234)
-
-
-class TestLogEvaluationResultsMultiHorizon:
-    """Multiple horizons on the same run build up a line-chart-ready history."""
-
-    def test_history_has_all_steps_in_order(self, isolated_mlflow):
+    def test_does_not_emit_stepped_metrics(self, isolated_mlflow):
+        """The flat path never writes stepped metrics — that is the
+        stepped helper's job and must not happen implicitly."""
         client, _ = isolated_mlflow
 
-        horizons = [1, 6, 12, 24, 48]
+        with mlflow.start_run() as run:
+            log_evaluation_results(_base_metrics(), horizon=6)
+            run_id = run.info.run_id
+
+        run_data = client.get_run(run_id).data.metrics
+        for stepped_name in STEPPED_METRIC_MAP.values():
+            assert stepped_name not in run_data, (
+                f"Stepped metric {stepped_name!r} leaked out of the flat path"
+            )
+
+
+class TestLogSteppedHorizonMetrics:
+    """``log_stepped_horizon_metrics`` accumulates a time series on one run."""
+
+    def test_history_has_all_steps_in_order(self, isolated_mlflow):
+        """Five horizons → five-point metric history on the active run."""
+        client, _ = isolated_mlflow
+
         horizon_minutes = [10, 60, 120, 240, 480]
         mae_values = [120.0, 210.0, 260.0, 335.0, 430.0]
+        by_horizon = {
+            hm: {"mae": mae, "rmse": mae * 1.4, "bias": 0.0, "skill_score": 0.2}
+            for hm, mae in zip(horizon_minutes, mae_values, strict=True)
+        }
 
         with mlflow.start_run() as run:
-            for h, hm, mae in zip(horizons, horizon_minutes, mae_values, strict=True):
-                log_evaluation_results(
-                    {"mae": mae, "rmse": mae * 1.4, "bias": 0.0, "skill_score": 0.2},
-                    horizon=h,
-                    horizon_minutes=hm,
-                )
+            log_stepped_horizon_metrics(by_horizon)
             run_id = run.info.run_id
 
         history = client.get_metric_history(run_id, "mae_by_horizon_min")
@@ -122,73 +107,108 @@ class TestLogEvaluationResultsMultiHorizon:
         for (_, logged_value), expected in zip(points, mae_values, strict=True):
             assert logged_value == pytest.approx(expected)
 
+        # Sibling stepped metrics follow the same shape
+        assert len(client.get_metric_history(run_id, "rmse_by_horizon_min")) == 5
+        assert len(client.get_metric_history(run_id, "bias_by_horizon_min")) == 5
+        assert len(client.get_metric_history(run_id, "skill_score_by_horizon_min")) == 5
 
-class TestLogEvaluationResultsEdgeCases:
-    """Edge cases called out in the plan."""
-
-    def test_unknown_metric_key_skipped_in_stepped_path(self, isolated_mlflow):
-        """Keys not in STEPPED_METRIC_MAP are skipped (no crash, no stepped log)."""
+    def test_logs_on_parent_not_children(self, isolated_mlflow):
+        """When called in a nested parent/child pattern, the stepped history
+        must live on the parent run. This is the canonical pattern from
+        MLflow issue #7060: one run, N steps, one curve."""
         client, _ = isolated_mlflow
-        metrics = {"mae": 100.0, "custom_metric": 42.0}
+
+        horizon_minutes = [10, 60, 120, 240, 480]
+        parent_metrics: dict[int, dict[str, float]] = {}
+
+        with mlflow.start_run(run_name="parent") as parent_run:
+            parent_id = parent_run.info.run_id
+            child_ids: list[str] = []
+            for hm in horizon_minutes:
+                with mlflow.start_run(run_name=f"child_{hm}", nested=True) as child_run:
+                    child_ids.append(child_run.info.run_id)
+                    m = {"mae": float(hm), "rmse": float(hm) * 1.5, "bias": 0.0}
+                    log_evaluation_results(m, horizon=hm // 10)
+                    parent_metrics[hm] = m
+            # Back in parent context after children exit
+            log_stepped_horizon_metrics(parent_metrics)
+
+        # Parent holds the full 5-step history
+        parent_history = client.get_metric_history(parent_id, "mae_by_horizon_min")
+        assert sorted(m.step for m in parent_history) == horizon_minutes
+
+        # Children hold NO stepped metrics
+        for cid in child_ids:
+            assert client.get_metric_history(cid, "mae_by_horizon_min") == []
+
+    def test_unknown_metric_key_skipped(self, isolated_mlflow):
+        """Keys absent from STEPPED_METRIC_MAP are silently skipped."""
+        client, _ = isolated_mlflow
 
         with mlflow.start_run() as run:
-            log_evaluation_results(metrics, horizon=6, horizon_minutes=60)
+            log_stepped_horizon_metrics({60: {"mae": 100.0, "custom_metric": 42.0}})
             run_id = run.info.run_id
 
-        run_data = client.get_run(run_id).data.metrics
-        # Flat path logs everything (including custom_metric)
-        assert run_data["h6_mae"] == pytest.approx(100.0)
-        assert run_data["h6_custom_metric"] == pytest.approx(42.0)
-
-        # Stepped path logs mae but silently skips custom_metric
         mae_history = client.get_metric_history(run_id, "mae_by_horizon_min")
-        assert len(mae_history) == 1
+        assert [m.step for m in mae_history] == [60]
         assert client.get_metric_history(run_id, "custom_metric_by_horizon_min") == []
 
     def test_zero_minutes_is_valid_step(self, isolated_mlflow):
-        """``horizon_minutes=0`` is a valid step value (e.g. nowcast)."""
+        """``step=0`` is valid (e.g. a nowcast horizon)."""
         client, _ = isolated_mlflow
 
         with mlflow.start_run() as run:
-            log_evaluation_results({"mae": 50.0}, horizon=0, horizon_minutes=0)
+            log_stepped_horizon_metrics({0: {"mae": 50.0}})
             run_id = run.info.run_id
 
         history = client.get_metric_history(run_id, "mae_by_horizon_min")
         assert [m.step for m in history] == [0]
         assert history[0].value == pytest.approx(50.0)
 
-    def test_stepped_without_flat_horizon(self, isolated_mlflow):
-        """``horizon=None, horizon_minutes=60`` still fires the stepped path."""
+    def test_persistence_metrics_logged_when_present(self, isolated_mlflow):
+        """``persistence_*`` keys are included in STEPPED_METRIC_MAP and
+        must be logged alongside the model's own metrics."""
         client, _ = isolated_mlflow
-        metrics = {"mae": 100.0, "rmse": 150.0}
 
         with mlflow.start_run() as run:
-            log_evaluation_results(metrics, horizon=None, horizon_minutes=60)
+            log_stepped_horizon_metrics(
+                {
+                    60: {
+                        "mae": 100.0,
+                        "persistence_mae": 150.0,
+                        "persistence_rmse": 200.0,
+                    },
+                    120: {
+                        "mae": 130.0,
+                        "persistence_mae": 180.0,
+                        "persistence_rmse": 230.0,
+                    },
+                }
+            )
             run_id = run.info.run_id
 
-        run_data = client.get_run(run_id).data.metrics
-        # Flat path falls through with no h{n}_ prefix
-        assert run_data["mae"] == pytest.approx(100.0)
-        assert run_data["rmse"] == pytest.approx(150.0)
-        assert "h6_mae" not in run_data
+        p_mae_history = client.get_metric_history(run_id, "persistence_mae_by_horizon_min")
+        points = sorted((m.step, m.value) for m in p_mae_history)
+        assert [p[0] for p in points] == [60, 120]
+        assert [p[1] for p in points] == pytest.approx([150.0, 180.0])
 
-        # Stepped path still fires
-        mae_history = client.get_metric_history(run_id, "mae_by_horizon_min")
-        assert [m.step for m in mae_history] == [60]
-
-    def test_persistence_metrics_stepped_when_present(self, isolated_mlflow):
-        """``persistence_mae`` keys in the input dict are stepped-logged too."""
+    def test_iterates_horizons_in_ascending_order(self, isolated_mlflow):
+        """Even if the input dict is unordered, the stepped history must be
+        logged in ascending step order so ``get_metric_history`` returns a
+        monotonic sequence."""
         client, _ = isolated_mlflow
-        metrics = {
-            "mae": 100.0,
-            "persistence_mae": 150.0,
-            "persistence_rmse": 200.0,
+
+        unordered = {
+            480: {"mae": 430.0},
+            10: {"mae": 120.0},
+            120: {"mae": 260.0},
+            60: {"mae": 210.0},
+            240: {"mae": 335.0},
         }
-
         with mlflow.start_run() as run:
-            log_evaluation_results(metrics, horizon=6, horizon_minutes=60)
+            log_stepped_horizon_metrics(unordered)
             run_id = run.info.run_id
 
-        history = client.get_metric_history(run_id, "persistence_mae_by_horizon_min")
-        assert [m.step for m in history] == [60]
-        assert history[0].value == pytest.approx(150.0)
+        history = client.get_metric_history(run_id, "mae_by_horizon_min")
+        steps = [m.step for m in history]
+        assert steps == sorted(steps), f"History not monotonic: {steps}"

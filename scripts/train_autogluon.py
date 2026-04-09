@@ -19,7 +19,11 @@ from windcast.features import get_feature_set, list_feature_sets
 from windcast.models.autogluon_model import AutoGluonConfig, train_autogluon
 from windcast.models.evaluation import compute_metrics
 from windcast.models.persistence import compute_persistence_metrics
-from windcast.tracking import log_evaluation_results, setup_mlflow
+from windcast.tracking import (
+    log_evaluation_results,
+    log_stepped_horizon_metrics,
+    setup_mlflow,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -292,6 +296,10 @@ def main() -> None:
         # Collect results for parent summary
         results_summary: list[str] = []
         ag_model_summary: list[str] = []
+        # Per-horizon metric dicts keyed by horizon_minutes — replayed on the
+        # parent run as a stepped time series after the child loop completes,
+        # so MLflow's Charts tab renders "metric vs horizon" natively.
+        horizon_metrics: dict[int, dict[str, float]] = {}
 
         # Train per horizon
         for h in horizons:
@@ -347,13 +355,17 @@ def main() -> None:
                     persistence_metrics = compute_persistence_metrics(
                         y_val.to_numpy(), y_persistence
                     )
-                    mlflow.log_metrics(
-                        {f"persistence_{k}": v for k, v in persistence_metrics.items()}
-                    )
+                    prefixed_persistence = {
+                        f"persistence_{k}": v for k, v in persistence_metrics.items()
+                    }
+                    mlflow.log_metrics(prefixed_persistence)
                 else:
                     metrics = compute_metrics(y_val.to_numpy(), y_pred)
+                    prefixed_persistence = {}
 
-                log_evaluation_results(metrics, horizon=h, horizon_minutes=h * data_resolution)
+                log_evaluation_results(metrics, horizon=h)
+                # Stash for the parent-level stepped-metric replay
+                horizon_metrics[h * data_resolution] = {**metrics, **prefixed_persistence}
 
                 # Log AutoGluon leaderboard as artifact
                 lb = predictor.leaderboard(data=None, silent=True)
@@ -399,7 +411,14 @@ def main() -> None:
                 )
                 ag_model_summary.append(f"h{h}: best={best_model}, {n_ag_models} models trained")
 
-        # Bubble up child metrics to parent
+        # Replay per-horizon metrics on the parent as a stepped time series
+        # (one point per horizon). This is what unlocks the native "metric vs
+        # horizon" line chart in the MLflow UI: one line per parent run, N
+        # points per line. Children only hold single-horizon flat metrics.
+        log_stepped_horizon_metrics(horizon_metrics)
+
+        # Bubble up flat child metrics to parent (enables compare_runs.py and
+        # search_runs filters like `metrics.h48_mae < 300`).
         active = mlflow.active_run()
         parent_run_id = active.info.run_id if active else ""
         client = mlflow.tracking.MlflowClient()  # pyright: ignore[reportPrivateImportUsage]

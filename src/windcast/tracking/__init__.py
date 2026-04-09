@@ -4,6 +4,7 @@ from windcast.tracking.mlflow_utils import (
     log_dataframe_artifact,
     log_evaluation_results,
     log_feature_set,
+    log_stepped_horizon_metrics,
     setup_mlflow,
 )
 
@@ -11,5 +12,6 @@ __all__ = [
     "log_dataframe_artifact",
     "log_evaluation_results",
     "log_feature_set",
+    "log_stepped_horizon_metrics",
     "setup_mlflow",
 ]

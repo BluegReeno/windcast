@@ -66,32 +66,23 @@ def log_feature_set(feature_set_name: str, feature_columns: list[str]) -> None:
 def log_evaluation_results(
     metrics: dict[str, float],
     horizon: int | None = None,
-    horizon_minutes: int | None = None,
 ) -> None:
-    """Log evaluation metrics to MLflow.
+    """Log evaluation metrics to the active MLflow run as flat keys.
 
-    Two complementary logging paths:
+    When ``horizon`` is given, metrics are prefixed with ``h{horizon}_`` so
+    that ``search_runs(filter_string=...)`` can filter on them and so that
+    ``scripts/compare_runs.py`` can read them back. These flat metrics are
+    logged once per call (one data point per metric name on the run).
 
-    1. **Flat path** (always active). When ``horizon`` is given, metrics are
-       prefixed with ``h{horizon}_`` and logged via :func:`mlflow.log_metrics`.
-       These are filterable via ``search_runs(filter_string=...)`` and feed
-       ``scripts/compare_runs.py``.
-    2. **Stepped path** (active when ``horizon_minutes`` is given). Each metric
-       key present in :data:`STEPPED_METRIC_MAP` is additionally logged under
-       its canonical stepped name (e.g. ``mae_by_horizon_min``) with
-       ``step=horizon_minutes``. MLflow then auto-plots "metric vs horizon"
-       line charts in the UI — one line per run — without custom config.
-
-    Both paths can fire together: in the per-horizon training loop, the flat
-    path produces ``h{n}_mae`` and the stepped path produces one data point
-    at ``step=n * data_resolution`` on ``mae_by_horizon_min``.
+    For the native MLflow "metric vs horizon" line chart, the stepped
+    companion :func:`log_stepped_horizon_metrics` must be called on a run
+    that accumulates **all** horizons — typically the parent of a nested
+    parent/child training loop. See that function's docstring for the
+    rationale (MLflow issues #2768 and #7060).
 
     Args:
         metrics: Dict of metric name -> value.
         horizon: If provided, prefix flat metrics with ``h{horizon}_``.
-        horizon_minutes: If provided, also log each metric in
-            :data:`STEPPED_METRIC_MAP` under its stepped name with
-            ``step=horizon_minutes`` (integer minutes ahead of forecast time).
     """
     if horizon is not None:
         prefixed = {f"h{horizon}_{k}": v for k, v in metrics.items()}
@@ -99,7 +90,41 @@ def log_evaluation_results(
     else:
         mlflow.log_metrics(metrics)
 
-    if horizon_minutes is not None:
+
+def log_stepped_horizon_metrics(
+    metrics_by_horizon_minutes: dict[int, dict[str, float]],
+) -> None:
+    """Log per-horizon metrics as a stepped time series on the active run.
+
+    For each ``(horizon_minutes, metrics)`` pair, every key present in
+    :data:`STEPPED_METRIC_MAP` is logged under its canonical stepped name
+    (e.g. ``mae_by_horizon_min``) with ``step=horizon_minutes``. Unknown
+    keys are silently skipped. Horizons are iterated in ascending order so
+    the resulting metric history is monotonic in ``step``.
+
+    **Call this on the parent run**, after all per-horizon children have
+    completed. The parent then holds a single time series per stepped
+    metric — which MLflow renders natively as "metric vs horizon" in the
+    Charts tab and in Compare Runs, one line per parent run. Logging
+    stepped metrics on a child run that covers a single horizon produces a
+    single-point series that the UI cannot stitch across sibling runs into
+    a curve — confirmed by MLflow maintainers in issues
+    `#2768 <https://github.com/mlflow/mlflow/issues/2768>`_ ("it's not
+    possible to plot metrics that belong to different runs as one curve")
+    and `#7060 <https://github.com/mlflow/mlflow/issues/7060>`_ (which
+    documents the canonical pattern: one run, N ``log_metric`` calls with
+    increasing ``step``).
+
+    Args:
+        metrics_by_horizon_minutes: Mapping of horizon (integer minutes
+            ahead of forecast time) to the metric dict returned by
+            :func:`windcast.models.evaluation.compute_metrics`, optionally
+            merged with ``persistence_*`` metrics. The ``minutes_ahead``
+            unit is the only one that is consistent across all EnerCast
+            domains (wind 10 min, solar 15 min, demand/price 60 min).
+    """
+    for horizon_minutes in sorted(metrics_by_horizon_minutes):
+        metrics = metrics_by_horizon_minutes[horizon_minutes]
         for metric_name, value in metrics.items():
             stepped_name = STEPPED_METRIC_MAP.get(metric_name)
             if stepped_name is not None:

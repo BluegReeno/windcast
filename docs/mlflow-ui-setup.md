@@ -58,19 +58,36 @@ once and it survives across UI restarts.
 
 ## Native line charts: metric vs horizon
 
-EnerCast training scripts log every per-horizon metric **twice**:
+EnerCast training scripts log every per-horizon metric in two complementary
+places:
 
-1. As a **flat** metric prefixed by horizon step — `h1_mae`, `h6_mae`, … —
-   which is queryable via `search_runs(filter_string=...)` and feeds
-   `scripts/compare_runs.py`.
-2. As a **stepped** metric under a canonical name (e.g. `mae_by_horizon_min`)
-   with `step = h * data_resolution` — i.e. the integer number of minutes
-   ahead of forecast time. MLflow's Line-chart widget auto-detects stepped
-   metrics and plots X=step, Y=value, one line per run, with zero config.
+1. **Flat**, on each child run, prefixed by horizon step — `h1_mae`,
+   `h6_mae`, … — filterable via `search_runs(filter_string=...)` and
+   consumed by `scripts/compare_runs.py`. These also bubble up to the parent
+   for a run-level summary.
+2. **Stepped**, on the **parent run only**, under canonical names like
+   `mae_by_horizon_min` with `step = h * data_resolution` (integer minutes
+   ahead of forecast time). MLflow's Line-chart widget auto-detects metrics
+   with multi-step histories and plots X=step, Y=value, **one line per run**,
+   with zero config.
 
-This gives you the "MAE as a function of horizon" view natively in the UI,
-without manually configuring five bar charts (one per horizon) or depending
-on the programmatic PNG export below.
+Each parent run thus holds a full 5-point MAE-vs-horizon curve. Select
+several parents in Compare Runs and you get one overlaid line per parent —
+exactly the "XGBoost vs AutoGluon across horizons" view we want for the
+WN slide deck.
+
+> **Why the parent and not the children?** MLflow does not stitch metrics
+> across sibling runs into a single curve. A child run with a single
+> `step=60` data point renders as a one-bar chart, and selecting five
+> sibling children in Compare Runs gives five independent 1-point series,
+> not a 5-point line. This is confirmed by MLflow maintainer @harupy in
+> [mlflow/mlflow#2768](https://github.com/mlflow/mlflow/issues/2768)
+> ("it's not possible to plot metrics that belong to different runs as one
+> curve") and the canonical "one run, N steps, one curve" pattern in
+> [mlflow/mlflow#7060](https://github.com/mlflow/mlflow/issues/7060). The
+> training scripts therefore collect per-horizon metrics during the nested
+> child loop and replay them on the parent via
+> `log_stepped_horizon_metrics()` once all horizons are done.
 
 ### Stepped metric names
 
@@ -82,24 +99,41 @@ on the programmatic PNG export below.
 | `skill_score_by_horizon_min` | `skill_score` | unitless, 1 = perfect |
 | `persistence_mae_by_horizon_min` | `persistence_mae` | same as MAE (baseline) |
 
-The step unit is `minutes_ahead`, which is the only unit consistent across
-wind (10 min resolution), demand (60 min), solar (15 min), and the planned
-price domain (60 min intraday + 720-2160 min D+1). A single line chart named
-`mae_by_horizon_min` therefore compares seamlessly across domains once their
-units are the same (e.g. all-wind comparisons within `enercast-kelmarsh`).
+The step unit is `minutes_ahead`, the only unit consistent across wind
+(10 min resolution), demand (60 min), solar (15 min), and the planned
+price domain (60 min intraday + 720-2160 min D+1). A single line chart
+named `mae_by_horizon_min` therefore compares seamlessly across domains
+within the same experiment.
 
 ### Recipe
 
-1. Open an experiment with runs trained **after** the stepped-logging
-   feature landed (2026-04-09 onwards).
-2. Charts tab → **Add chart** → **Line chart**.
-3. Metric: `mae_by_horizon_min` (or any stepped sibling).
-4. X axis auto-detects `step` → displayed in minutes ahead.
-5. Each nested child run becomes one point on the chart; parent runs are
-   omitted because stepped metrics live on children only (nested-run
-   semantics).
+1. Open an experiment with runs trained **after** the stepped-on-parent
+   refactor (2026-04-09 onwards — older runs can be backfilled via
+   `scripts/backfill_stepped_metrics.py`).
+2. Apply the filter ``tags.`enercast.run_type` = 'parent'`` so the chart
+   aggregates over parent runs only. Children would each contribute a
+   confusing 1-point series.
+3. Charts tab → **Add chart** → **Line chart**.
+4. Metric: `mae_by_horizon_min` (or any stepped sibling).
+5. X axis auto-detects `step` → displayed in minutes ahead. Each selected
+   parent run is drawn as one continuous 5-point line.
+6. Pin the chart via the bookmark icon to persist the layout across UI
+   restarts.
 
-Pin the chart via the bookmark icon to persist the layout across UI restarts.
+### Backfilling old runs
+
+For a parent run trained before the refactor — e.g. the expensive
+`kwf1-autogluon-wind_full` run that takes ~30 min to retrain — use:
+
+```bash
+uv run python scripts/backfill_stepped_metrics.py \
+    --parent-run-name kwf1-autogluon-wind_full \
+    --experiment enercast-kelmarsh \
+    --data-resolution-min 10
+```
+
+The script reads the per-horizon flat metrics from each child run and
+replays them as stepped metrics on the parent — no retraining required.
 
 ## Alternative: programmatic comparison
 
@@ -145,7 +179,13 @@ bubbled up from child runs via `client.search_runs` at the end of training.
 Older runs predating this logic will not have those metrics on the parent —
 look at the child runs instead, or refer to the historical CSV snapshot.
 
-**Empty `mae_by_horizon_min` line chart** — the stepped metrics only exist
-for runs trained after the feature landed (2026-04-09). Older runs only
-have the flat `h{n}_mae` bar-chart metrics; re-run training to populate the
-stepped line chart, or fall back to the bar-chart-per-horizon recipe above.
+**Empty `mae_by_horizon_min` line chart** — the stepped metrics live on
+**parent runs only**. Make sure the filter ``tags.`enercast.run_type` =
+'parent'`` is applied. Runs trained before the stepped-on-parent refactor
+(2026-04-09) can be backfilled via `scripts/backfill_stepped_metrics.py`
+without retraining.
+
+**Line chart shows only 1 point per run** — you are almost certainly
+looking at child runs, not parents. Children only carry flat `h{n}_*`
+metrics and have no stepped history. Filter to `enercast.run_type =
+'parent'` and re-open the chart.

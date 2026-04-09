@@ -1,5 +1,26 @@
 # Feature: Stepped Horizon Metrics for Native MLflow Line Charts
 
+> **CORRECTION (2026-04-09 afternoon)** — the original plan was implemented
+> but a design error was discovered after shipping: stepped metrics were
+> logged on **child** runs, each with a single `step` point. This does not
+> produce a native line chart because MLflow does not stitch metrics across
+> sibling runs into one curve. Confirmed by MLflow maintainers in
+> [mlflow/mlflow#2768](https://github.com/mlflow/mlflow/issues/2768)
+> (*"it's not possible to plot metrics that belong to different runs as one
+> curve"*) and [mlflow/mlflow#7060](https://github.com/mlflow/mlflow/issues/7060)
+> (canonical pattern: one run, N `log_metric` calls at increasing `step`).
+>
+> **Fix applied**: stepped metrics are now logged on the **parent** run
+> after the per-horizon child loop completes, via the new helper
+> `log_stepped_horizon_metrics()`. Each parent accumulates all 5 horizons
+> as a single metric history → renders natively as a multi-point line
+> chart in the UI, one line per parent run. Anti-pattern #3 below (which
+> forbade logging stepped on the parent) was wrong and has been inverted.
+>
+> See `docs/mlflow-ui-setup.md` → "Native line charts: metric vs horizon"
+> for the corrected recipe, and `scripts/backfill_stepped_metrics.py` for
+> retroactively fixing pre-refactor runs without retraining.
+
 The following plan should be complete, but validate documentation and codebase patterns before implementing.
 
 Pay special attention to: keep existing `h{n}_mae` metrics (needed for filtering + `compare_runs.py`), add stepped metrics *in addition*, NOT as a replacement. Step unit must be `minutes_ahead` for cross-domain consistency.
