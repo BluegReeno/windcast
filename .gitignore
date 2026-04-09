@@ -44,6 +44,11 @@ build/
 
 # MLflow tracking
 mlruns/
+mlflow.db
+mlartifacts/
+
+# Script output reports
+reports/
 
 # Jupyter
 .ipynb_checkpoints/

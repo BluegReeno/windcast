@@ -11,13 +11,13 @@ logger = logging.getLogger(__name__)
 
 
 def setup_mlflow(
-    tracking_uri: str = "file:./mlruns",
+    tracking_uri: str = "sqlite:///mlflow.db",
     experiment_name: str | None = None,
 ) -> None:
     """Configure MLflow tracking URI and optionally set experiment.
 
     Args:
-        tracking_uri: MLflow tracking URI (default: local file store).
+        tracking_uri: MLflow tracking URI (default: local SQLite backend).
         experiment_name: Experiment name to create/set. None = skip.
     """
     mlflow.set_tracking_uri(tracking_uri)

@@ -164,7 +164,7 @@ class WindCastSettings(BaseSettings):
     qc: QCConfig = Field(default_factory=QCConfig)
     demand_qc: DemandQCConfig = Field(default_factory=DemandQCConfig)
     solar_qc: SolarQCConfig = Field(default_factory=SolarQCConfig)
-    mlflow_tracking_uri: str = "file:./mlruns"
+    mlflow_tracking_uri: str = "sqlite:///mlflow.db"
 
     @property
     def raw_dir(self) -> Path:
