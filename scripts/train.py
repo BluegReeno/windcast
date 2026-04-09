@@ -419,7 +419,9 @@ def main() -> None:
             )
             for child in children:
                 for k, v in child.data.metrics.items():
-                    if k.startswith("h") and ("_mae" in k or "_skill_score" in k):
+                    if k.startswith("h") and (
+                        "_mae" in k or "_rmse" in k or "_skill_score" in k
+                    ):
                         mlflow.log_metric(k, v)
 
         summary_text = "\n".join(results_summary)
