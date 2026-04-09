@@ -113,10 +113,34 @@
 - [x] ML backends comparison (XGBoost vs mlforecast)
 - [x] Presentation plan (7 slides, narrative arc)
 
+### Pass 6b — MLflow UI polish + AutoGluon speed + SQLite migration [x] (Thu 9 April afternoon)
+- [x] **MLflow UI readability**:
+  - [x] Added `enercast.run_type = {parent,child}` tag in `train.py` + `train_autogluon.py` for clean UI filtering
+  - [x] Created `scripts/compare_runs.py` — programmatic MAE + Skill bar charts per horizon (PNG output in `reports/`) + Markdown comparison table to stdout
+  - [x] Wrote `docs/mlflow-ui-setup.md` — reusable guide for UI launch, filter recipes, Charts tab config, tag reference
+  - [x] Migrated MLflow backend from `file:./mlruns` to `sqlite:///mlflow.db` — removes deprecation warning, unlocks `IS NULL` tag filters
+- [x] AutoGluon speed defaults: script CLI defaults switched to `good_quality` + `time_limit=120` (~2-4 min/horizon vs 6 min). `AutoGluonConfig` class defaults stay at `best_quality` for final runs.
+
+**Reproducibility check after migration (new SQLite vs historical CSV snapshot):**
+- XGBoost (3 runs × 5 horizons × 2 metrics): **0.0000 deviation** — bit-for-bit identical
+- AutoGluon (1 run × 5 horizons × 2 metrics): **max 0.76% deviation** — bagging/stacking quasi-deterministic
+- Historical snapshot: `docs/WNchallenge/historical_runs_2026-04-08.csv` (24 runs preserved as safety baseline)
+
+**Updated results table (val set, turbine kwf1) — post-migration, all 4 backends:**
+
+| Horizon | XGB Baseline MAE | XGB Enriched MAE | XGB Full MAE | AG Full MAE | XGB Full Skill | AG Full Skill |
+|---------|------------------|------------------|--------------|-------------|----------------|---------------|
+| h1 (10m) | 120 | 119 | 115 | **113** | 0.236 | 0.235 |
+| h6 (1h) | 210 | 207 | 184 | **177** | 0.195 | 0.185 |
+| h12 (2h) | 259 | 256 | 205 | **196** | 0.250 | 0.237 |
+| h24 (4h) | 334 | 329 | 235 | **224** | 0.315 | 0.297 |
+| h48 (8h) | 432 | 429 | 283 | **264** | 0.364 | 0.349 |
+
+Generated charts: `reports/comparison_enercast-kelmarsh_mae.png` and `reports/comparison_enercast-kelmarsh_skill.png` — ready for slides.
+
 ### Planned Improvements (post-presentation)
 - [ ] `mlflow.evaluate()` — replace manual evaluation with MLflow's eval framework (auto residual plots, SHAP, R²). Keep custom skill_score + regime_analysis via `extra_metrics`
-- [ ] AutoGluon-TimeSeries — 3rd backend, ensemble of DeepAR/TFT/Chronos/XGBoost, probabilistic forecasts
-- [ ] Migrate MLflow backend from `file:./mlruns` to `sqlite:///mlflow.db`
+- [ ] AutoGluon-TimeSeries — 4th backend, ensemble of DeepAR/TFT/Chronos/XGBoost, probabilistic forecasts
 
 ---
 
