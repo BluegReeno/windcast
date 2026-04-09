@@ -50,5 +50,9 @@ mlartifacts/
 # Script output reports
 reports/
 
+# Local request/HTTP caches
+.cache.sqlite
+.test_cache.sqlite
+
 # Jupyter
 .ipynb_checkpoints/
