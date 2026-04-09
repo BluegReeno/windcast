@@ -263,7 +263,7 @@ def main() -> None:
     }
 
     with mlflow.start_run(run_name=f"{run_label}-{feature_set}"):
-        mlflow.set_tags(parent_tags)
+        mlflow.set_tags({**parent_tags, "enercast.run_type": "parent"})
 
         ts_col = "timestamp_utc"
         mlflow.log_params(
@@ -332,6 +332,7 @@ def main() -> None:
                 mlflow.set_tags(
                     {
                         **parent_tags,
+                        "enercast.run_type": "child",
                         "enercast.horizon_steps": str(h),
                         "enercast.horizon_desc": horizon_desc[h],
                     }

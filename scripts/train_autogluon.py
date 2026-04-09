@@ -138,14 +138,14 @@ def main() -> None:
     parser.add_argument(
         "--time-limit",
         type=int,
-        default=300,
-        help="AutoGluon time limit per horizon in seconds. Default: 300",
+        default=120,
+        help="AutoGluon time limit per horizon in seconds. Default: 120 (demo speed)",
     )
     parser.add_argument(
         "--presets",
-        default="best_quality",
+        default="good_quality",
         choices=["best_quality", "high_quality", "good_quality", "medium_quality"],
-        help="AutoGluon presets. Default: best_quality",
+        help="AutoGluon presets. Default: good_quality (demo); use best_quality for final runs",
     )
     args = parser.parse_args()
 
@@ -251,7 +251,7 @@ def main() -> None:
     ts_col = "timestamp_utc"
 
     with mlflow.start_run(run_name=f"{run_label}-autogluon-{feature_set}"):
-        mlflow.set_tags(parent_tags)
+        mlflow.set_tags({**parent_tags, "enercast.run_type": "parent"})
 
         mlflow.log_params(
             {
@@ -323,6 +323,7 @@ def main() -> None:
                 mlflow.set_tags(
                     {
                         **parent_tags,
+                        "enercast.run_type": "child",
                         "enercast.horizon_steps": str(h),
                         "enercast.horizon_desc": horizon_desc[h],
                     }
