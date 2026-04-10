@@ -59,7 +59,31 @@ def main() -> None:
         "--weather-db",
         type=Path,
         default=None,
-        help="Path to weather SQLite cache. Enables NWP horizon features for *_full sets.",
+        help=(
+            "Explicit path to a weather SQLite cache. If set, takes precedence over "
+            "--weather-source. Enables NWP horizon features for *_full sets."
+        ),
+    )
+    parser.add_argument(
+        "--weather-source",
+        choices=["archive", "historical_forecast", "blend"],
+        default=None,
+        help=(
+            "Which weather data source to read: "
+            "'archive' = ERA5 reanalysis (data/weather.db), "
+            "'historical_forecast' = archived NWP forecasts (data/weather_forecast.db), "
+            "'blend' = ERA5 for rows <2022-01-01, forecasts for rows ≥2022-01-01. "
+            "Only used when --weather-db is NOT set. "
+            "Default: none (no NWP features)."
+        ),
+    )
+    parser.add_argument(
+        "--forecast-cutoff",
+        default="2022-01-01",
+        help=(
+            "Timestamp cutoff for --weather-source blend: rows with timestamp_utc < "
+            "cutoff use ERA5, rows >= cutoff use historical forecasts. Default 2022-01-01."
+        ),
     )
     parser.add_argument(
         "--dataset",
@@ -116,10 +140,13 @@ def main() -> None:
     resolution_minutes = DOMAIN_RESOLUTION.get(args.domain, 60)
     horizons = settings.forecast_horizons
 
-    if args.weather_db is not None:
-        from windcast.weather import get_weather_weighted
-        from windcast.weather.registry import WeightedWeatherConfig, get_weather_config
-        from windcast.weather.storage import WeatherStorage
+    if args.weather_db is not None or args.weather_source is not None:
+        from windcast.weather import (
+            DEFAULT_DB_PATH,
+            WEATHER_FORECAST_DB_PATH,
+            load_blended_weather,
+            load_weather_from_db,
+        )
 
         # For demand, weather config name tracks the dataset; wind/solar are 1:1
         domain_weather_map = {
@@ -131,53 +158,20 @@ def main() -> None:
         if weather_name is None:
             logger.warning("No weather config for domain %s", args.domain)
         else:
-            wcfg = get_weather_config(weather_name)
-            if isinstance(wcfg, WeightedWeatherConfig):
-                # Determine range from the first point's cached coverage
-                first_point = wcfg.points[0]
-                storage = WeatherStorage(args.weather_db)
-                try:
-                    coverage = storage.get_coverage(
-                        f"{first_point.latitude}_{first_point.longitude}"
-                    )
-                finally:
-                    storage.close()
-                if coverage is None:
-                    logger.error(
-                        "No weather data in %s for %s (first point %s)",
-                        args.weather_db,
-                        weather_name,
-                        first_point.name,
-                    )
-                else:
-                    start, end = coverage[0][:10], coverage[1][:10]
-                    weather_df = get_weather_weighted(wcfg, start, end, db_path=args.weather_db)
-                    logger.info(
-                        "Loaded weighted NWP: %d rows, %d variables, %d points from %s",
-                        len(weather_df),
-                        len(weather_df.columns) - 1,
-                        len(wcfg.points),
-                        args.weather_db,
-                    )
-            else:
-                storage = WeatherStorage(args.weather_db)
-                try:
-                    coverage = storage.get_coverage(f"{wcfg.latitude}_{wcfg.longitude}")
-                    if coverage is None:
-                        logger.error("No weather data in %s for %s", args.weather_db, weather_name)
-                    else:
-                        start, end = coverage[0][:10], coverage[1][:10]
-                        weather_df = storage.query(
-                            f"{wcfg.latitude}_{wcfg.longitude}", start, end, wcfg.variables
-                        )
-                        logger.info(
-                            "Loaded NWP: %d rows, %d variables from %s",
-                            len(weather_df),
-                            len(weather_df.columns) - 1,
-                            args.weather_db,
-                        )
-                finally:
-                    storage.close()
+            if args.weather_db is not None:
+                # Explicit path override — always single-source
+                weather_df = load_weather_from_db(weather_name, args.weather_db)
+            elif args.weather_source == "archive":
+                weather_df = load_weather_from_db(weather_name, DEFAULT_DB_PATH)
+            elif args.weather_source == "historical_forecast":
+                weather_df = load_weather_from_db(weather_name, WEATHER_FORECAST_DB_PATH)
+            elif args.weather_source == "blend":
+                weather_df = load_blended_weather(
+                    weather_name,
+                    era5_db=DEFAULT_DB_PATH,
+                    forecast_db=WEATHER_FORECAST_DB_PATH,
+                    cutoff=args.forecast_cutoff,
+                )
 
     for pq_file in parquet_files:
         logger.info("Processing %s", pq_file.name)

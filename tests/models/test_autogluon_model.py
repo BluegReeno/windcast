@@ -72,3 +72,46 @@ class TestTrainAutoGluon:
         assert len(autolog_calls) >= 2
         assert autolog_calls[0].kwargs.get("disable") is True
         assert autolog_calls[1].kwargs.get("disable") is False
+
+    @patch("windcast.models.autogluon_model.mlflow")
+    def test_fit_never_receives_val_as_tuning_data(self, mock_mlflow, tmp_path):
+        """Regression guard: val_pd must NEVER be passed as tuning_data to fit().
+
+        Rationale: if tuning_data=val_pd, AutoGluon uses the caller's validation
+        set for stacker selection + ensemble weighting + early stopping, which
+        makes the subsequent "eval on val_pd" step a self-fulfilling in-sample
+        score. This was the leak caught on 2026-04-09 that produced a fake
+        -74% MAE advantage over XGBoost on RTE demand_full.
+
+        See: feedback_verify_extraordinary_results.md and autogluon_model.py docstring.
+        """
+        from unittest.mock import MagicMock
+
+        X_train, y_train, X_val, y_val = _make_regression_data()
+        config = AutoGluonConfig(time_limit=30, presets="medium_quality")
+
+        # Mock TabularPredictor so we never actually train — we only care about fit() kwargs
+        with patch("autogluon.tabular.TabularPredictor") as mock_predictor_cls:
+            mock_predictor = MagicMock()
+            mock_predictor.leaderboard.return_value = MagicMock(
+                iloc=[MagicMock(__getitem__=lambda self, k: 0.0)],
+                __len__=lambda self: 1,
+            )
+            mock_predictor_cls.return_value = mock_predictor
+
+            train_autogluon(X_train, y_train, X_val, y_val, config, ag_path=tmp_path / "ag")
+
+        # Confirm fit() was called exactly once, and tuning_data was NOT in its kwargs
+        assert mock_predictor.fit.call_count == 1, "fit() should be called exactly once"
+        fit_kwargs = mock_predictor.fit.call_args.kwargs
+        assert "tuning_data" not in fit_kwargs, (
+            f"LEAK GUARD: tuning_data must not be passed to fit(). "
+            f"Got kwargs: {list(fit_kwargs.keys())}. "
+            f"AutoGluon would use the caller's validation set for ensemble "
+            f"selection, turning subsequent eval on val into an in-sample score."
+        )
+        # Sanity: the healthy path still passes use_bag_holdout=True so AG
+        # carves its own tuning holdout from train_data
+        assert fit_kwargs.get("use_bag_holdout") is True, (
+            "Expected use_bag_holdout=True so AG holds out a tuning slice from train_data"
+        )

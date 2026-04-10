@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 # solar 15 min, demand 60 min, price 60 min). Keep this map in sync with
 # `compute_metrics` and the persistence-metrics logging in the training scripts.
 STEPPED_METRIC_MAP: dict[str, str] = {
+    # Validation set metrics (flat keys, historical default)
     "mae": "mae_by_horizon_min",
     "rmse": "rmse_by_horizon_min",
     "bias": "bias_by_horizon_min",
@@ -27,6 +28,17 @@ STEPPED_METRIC_MAP: dict[str, str] = {
     "persistence_mae": "persistence_mae_by_horizon_min",
     "persistence_rmse": "persistence_rmse_by_horizon_min",
     "persistence_bias": "persistence_bias_by_horizon_min",
+    # Held-out test set metrics — the gold standard number for slides and
+    # cross-experiment comparison. Test is never seen during training, tuning,
+    # or feature selection; computed once per training run, right after val.
+    "test_mae": "test_mae_by_horizon_min",
+    "test_rmse": "test_rmse_by_horizon_min",
+    "test_bias": "test_bias_by_horizon_min",
+    "test_skill_score": "test_skill_score_by_horizon_min",
+    "test_mape": "test_mape_by_horizon_min",
+    "test_persistence_mae": "test_persistence_mae_by_horizon_min",
+    "test_persistence_rmse": "test_persistence_rmse_by_horizon_min",
+    "test_persistence_bias": "test_persistence_bias_by_horizon_min",
 }
 
 

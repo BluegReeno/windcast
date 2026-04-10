@@ -8,7 +8,11 @@ from pathlib import Path
 
 import polars as pl
 
-from windcast.weather.provider import OpenMeteoProvider, WeatherProvider
+from windcast.weather.provider import (
+    HistoricalForecastProvider,
+    OpenMeteoProvider,
+    WeatherProvider,
+)
 from windcast.weather.registry import (
     AnyWeatherConfig,
     WeatherConfig,
@@ -20,23 +24,32 @@ from windcast.weather.registry import (
 from windcast.weather.storage import WeatherStorage
 
 __all__ = [
+    "DEFAULT_DB_PATH",
+    "WEATHER_FORECAST_DB_PATH",
     "AnyWeatherConfig",
+    "HistoricalForecastProvider",
+    "OpenMeteoProvider",
     "WeatherConfig",
     "WeatherPoint",
     "WeatherProvider",
     "WeatherStorage",
     "WeightedWeatherConfig",
+    "get_forecast_weather",
     "get_weather",
     "get_weather_config",
     "get_weather_weighted",
     "list_weather_configs",
+    "load_blended_weather",
+    "load_weather_from_db",
 ]
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = Path("data/weather.db")
+WEATHER_FORECAST_DB_PATH = Path("data/weather_forecast.db")
 
 ERA5_LAG_DAYS = 5
+HISTORICAL_FORECAST_EARLIEST = "2022-01-01"
 
 
 def _location_key(config: WeatherConfig) -> str:
@@ -192,6 +205,196 @@ def _weighted_mean(
 
     national = stacked.group_by("timestamp_utc").agg(*agg_exprs).sort("timestamp_utc")
     return national
+
+
+def get_forecast_weather(
+    config_name: str,
+    start_date: str,
+    end_date: str,
+    db_path: Path = WEATHER_FORECAST_DB_PATH,
+    provider: WeatherProvider | None = None,
+) -> pl.DataFrame:
+    """Fetch archived NWP *forecast* weather for a registered config.
+
+    Thin wrapper around :func:`get_weather` that defaults the provider to
+    :class:`HistoricalForecastProvider` and the cache path to
+    :data:`WEATHER_FORECAST_DB_PATH`. Works for both single-point and
+    weighted multi-point configs (dispatch happens inside ``get_weather``).
+
+    Use this for val/test periods where honest forecast-time features are
+    required. Raises if ``start_date`` is before the Open-Meteo
+    historical-forecast coverage start (2022-01-01).
+    """
+    if start_date < HISTORICAL_FORECAST_EARLIEST:
+        raise ValueError(
+            "Historical forecast API coverage starts "
+            f"{HISTORICAL_FORECAST_EARLIEST}; got start_date={start_date}. "
+            "Use get_weather() (ERA5) for earlier periods or blend mode."
+        )
+
+    if provider is None:
+        provider = HistoricalForecastProvider()
+
+    return get_weather(
+        config_name=config_name,
+        start_date=start_date,
+        end_date=end_date,
+        db_path=db_path,
+        provider=provider,
+    )
+
+
+def load_weather_from_db(weather_name: str, db_path: Path) -> pl.DataFrame | None:
+    """Load cached NWP weather for a registered config from a single SQLite db.
+
+    Supports both single-point :class:`WeatherConfig` and multi-point
+    :class:`WeightedWeatherConfig`. Returns ``None`` if the db has no coverage
+    for the config's location(s). Unlike :func:`get_weather`, this does not
+    hit any remote API — it only reads what is already cached in ``db_path``.
+    """
+    wcfg = get_weather_config(weather_name)
+
+    if isinstance(wcfg, WeightedWeatherConfig):
+        first_point = wcfg.points[0]
+        storage = WeatherStorage(db_path)
+        try:
+            coverage = storage.get_coverage(f"{first_point.latitude}_{first_point.longitude}")
+        finally:
+            storage.close()
+        if coverage is None:
+            logger.error(
+                "No weather data in %s for %s (first point %s)",
+                db_path,
+                weather_name,
+                first_point.name,
+            )
+            return None
+        start, end = coverage[0][:10], coverage[1][:10]
+        df = _read_weighted_from_cache(wcfg, start, end, db_path)
+        logger.info(
+            "Loaded weighted NWP: %d rows, %d variables, %d points from %s",
+            len(df),
+            len(df.columns) - 1,
+            len(wcfg.points),
+            db_path,
+        )
+        return df
+
+    storage = WeatherStorage(db_path)
+    try:
+        coverage = storage.get_coverage(f"{wcfg.latitude}_{wcfg.longitude}")
+        if coverage is None:
+            logger.error("No weather data in %s for %s", db_path, weather_name)
+            return None
+        start, end = coverage[0][:10], coverage[1][:10]
+        df = storage.query(f"{wcfg.latitude}_{wcfg.longitude}", start, end, wcfg.variables)
+    finally:
+        storage.close()
+    logger.info(
+        "Loaded NWP: %d rows, %d variables from %s",
+        len(df),
+        len(df.columns) - 1,
+        db_path,
+    )
+    return df
+
+
+def _read_weighted_from_cache(
+    config: WeightedWeatherConfig,
+    start_date: str,
+    end_date: str,
+    db_path: Path,
+) -> pl.DataFrame:
+    """Cache-only read for a weighted config — no remote fetch.
+
+    Mirrors the aggregation in :func:`get_weather_weighted` but skips the
+    :func:`_fetch_missing` step so it can be used against either
+    ``weather.db`` or ``weather_forecast.db`` without hitting the network.
+    """
+    storage = WeatherStorage(db_path)
+    per_point_dfs: list[tuple[float, pl.DataFrame]] = []
+    try:
+        for point in config.points:
+            loc_key = f"{point.latitude}_{point.longitude}"
+            df = storage.query(loc_key, start_date, end_date, config.variables)
+            if df.is_empty():
+                logger.warning(
+                    "Empty NWP slice for point %s (%s,%s) in %s",
+                    point.name,
+                    point.latitude,
+                    point.longitude,
+                    db_path,
+                )
+                continue
+            per_point_dfs.append((point.weight, df))
+    finally:
+        storage.close()
+
+    if not per_point_dfs:
+        return pl.DataFrame(schema={"timestamp_utc": pl.Datetime("us", "UTC")})
+
+    return _weighted_mean(per_point_dfs, config.variables)
+
+
+def load_blended_weather(
+    weather_name: str,
+    era5_db: Path,
+    forecast_db: Path,
+    cutoff: str,
+) -> pl.DataFrame | None:
+    """Blend ERA5 and archived-forecast weather at a timestamp cutoff.
+
+    Rows with ``timestamp_utc < cutoff`` come from *era5_db* and rows with
+    ``timestamp_utc >= cutoff`` come from *forecast_db*. Columns must match
+    between the two sources (same variables / same config).
+
+    This is the mode to use for honest val/test features while still getting
+    long ERA5 train history — mirrors WattCast's production pattern.
+
+    Args:
+        weather_name: Registered weather config name.
+        era5_db: Path to the ERA5 SQLite cache.
+        forecast_db: Path to the historical-forecast SQLite cache.
+        cutoff: ISO date string, e.g. ``"2022-01-01"``.
+
+    Returns:
+        A wide NWP DataFrame with ``timestamp_utc`` + variable columns,
+        sorted by timestamp, or ``None`` if both sources are empty.
+    """
+    era5_df = load_weather_from_db(weather_name, era5_db)
+    forecast_df = load_weather_from_db(weather_name, forecast_db)
+
+    if era5_df is None and forecast_df is None:
+        logger.error("Blend mode: neither ERA5 nor forecast db has data for %s", weather_name)
+        return None
+    if era5_df is None:
+        logger.warning("Blend mode: ERA5 db empty, using forecast db only")
+        return forecast_df
+    if forecast_df is None:
+        logger.warning("Blend mode: forecast db empty, using ERA5 db only")
+        return era5_df
+
+    cutoff_dt = datetime.fromisoformat(cutoff).replace(tzinfo=UTC)
+    era5_pre = era5_df.filter(pl.col("timestamp_utc") < cutoff_dt)
+    forecast_post = forecast_df.filter(pl.col("timestamp_utc") >= cutoff_dt)
+
+    # Align columns (both sources should have the same schema, but guard anyway)
+    common_cols = [c for c in era5_pre.columns if c in forecast_post.columns]
+    if "timestamp_utc" not in common_cols:
+        common_cols = ["timestamp_utc", *common_cols]
+    era5_pre = era5_pre.select(common_cols)
+    forecast_post = forecast_post.select(common_cols)
+
+    blended = pl.concat([era5_pre, forecast_post], how="vertical_relaxed").sort("timestamp_utc")
+    logger.info(
+        "Blended NWP: %d rows pre-%s (ERA5) + %d rows >=%s (forecast) = %d total",
+        len(era5_pre),
+        cutoff,
+        len(forecast_post),
+        cutoff,
+        len(blended),
+    )
+    return blended
 
 
 def _fetch_missing(

@@ -95,6 +95,32 @@ def test_get_coverage_returns_range():
         storage.close()
 
 
+def test_two_storages_at_distinct_paths_are_isolated():
+    """Two WeatherStorage instances at distinct db_paths must not share rows.
+
+    Regression guard for the ERA5 leak fix: the two-database design (weather.db
+    for ERA5, weather_forecast.db for archived forecasts) depends on
+    independent physical files.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        era5 = WeatherStorage(Path(tmpdir) / "weather.db")
+        forecast = WeatherStorage(Path(tmpdir) / "weather_forecast.db")
+
+        era5.upsert("test_loc", _make_weather_df(n_hours=3))
+
+        # Forecast db should be empty for the same key
+        assert forecast.get_coverage("test_loc") is None
+        result = forecast.query("test_loc", "2021-01-01", "2021-01-01")
+        assert result.is_empty()
+
+        # ERA5 db still has its data
+        era5_result = era5.query("test_loc", "2021-01-01", "2021-01-01")
+        assert len(era5_result) == 3
+
+        era5.close()
+        forecast.close()
+
+
 def test_query_filters_by_date_range():
     """Query only returns rows within requested range."""
     with tempfile.TemporaryDirectory() as tmpdir:

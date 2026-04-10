@@ -23,6 +23,7 @@ WIND_VARIABLES: list[str] = [
 ]
 
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
+HISTORICAL_FORECAST_URL = "https://historical-forecast-api.open-meteo.com/v1/forecast"
 
 
 def build_client(
@@ -74,8 +75,74 @@ def fetch_historical_weather(
     }
 
     responses = client.weather_api(ARCHIVE_URL, params=params)
-    response = responses[0]
+    return _response_to_polars(responses[0], variables)
 
+
+def fetch_historical_forecast_weather(
+    latitude: float,
+    longitude: float,
+    start_date: str,
+    end_date: str,
+    variables: list[str] | None = None,
+    client: openmeteo_requests.Client | None = None,
+) -> pl.DataFrame:
+    """Fetch hourly archived NWP *forecast* output from Open-Meteo.
+
+    Unlike :func:`fetch_historical_weather` (ERA5 reanalysis = observed weather),
+    this endpoint returns the model output that was actually *forecast* at the
+    time — stitched from the short-range portion of successive NWP runs.
+    Coverage starts 2022-01-01 for ICON; earlier for ECMWF IFS (2017+) and
+    GFS (2021+).
+
+    This is the function to use for honest val/test features where the model
+    must not peek at future ground truth. See the ERA5 leak incident note in
+    ``docs/WNchallenge/post-era5-fix-results.md`` for the motivation.
+
+    Bias vs a fully-issued D+1 forecast: ~1°C RMSE at D+1, ~3°C at D+7 on
+    temperature (measured in WattCast production, see
+    ``wattcast/docs/delivery-time-weather-features.md``).
+
+    Args:
+        latitude: Location latitude.
+        longitude: Location longitude.
+        start_date: Start date ISO format "YYYY-MM-DD".
+        end_date: End date ISO format "YYYY-MM-DD".
+        variables: Weather variables to fetch. Defaults to WIND_VARIABLES.
+        client: Pre-built client. Creates new one if None.
+
+    Returns:
+        Polars DataFrame with timestamp_utc + weather variable columns — same
+        schema as :func:`fetch_historical_weather` so downstream consumers are
+        source-agnostic.
+
+    # adapted from wattcast/src/wattcast/data/open_meteo.py::fetch_historical_forecast_weather
+    """
+    if variables is None:
+        variables = WIND_VARIABLES
+    if client is None:
+        client = build_client()
+
+    params: dict[str, Any] = {
+        "latitude": latitude,
+        "longitude": longitude,
+        "start_date": start_date,
+        "end_date": end_date,
+        "hourly": variables,
+        "wind_speed_unit": "ms",
+        "timezone": "UTC",
+    }
+
+    responses = client.weather_api(HISTORICAL_FORECAST_URL, params=params)
+    return _response_to_polars(responses[0], variables)
+
+
+def _response_to_polars(response: Any, variables: list[str]) -> pl.DataFrame:
+    """Parse an Open-Meteo protobuf response into a wide Polars DataFrame.
+
+    Shared by :func:`fetch_historical_weather` and
+    :func:`fetch_historical_forecast_weather` — both APIs return the same
+    ``hourly`` shape.
+    """
     hourly = response.Hourly()
     assert hourly is not None, "No hourly data in Open-Meteo response"
 
@@ -93,7 +160,7 @@ def fetch_historical_weather(
 
     data: dict[str, pl.Series] = {"timestamp_utc": timestamps}
     for i, var_name in enumerate(variables):
-        values = hourly.Variables(i).ValuesAsNumpy()  # type: ignore[union-attr]
+        values = hourly.Variables(i).ValuesAsNumpy()
         data[var_name] = pl.Series(var_name, values, dtype=pl.Float32)
 
     return pl.DataFrame(data)
