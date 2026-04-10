@@ -93,15 +93,23 @@ def _infer_domain(runs: pd.DataFrame) -> str | None:
     return str(runs["tags.enercast.domain"].mode().iat[0])
 
 
-def _fetch_parent_runs(experiment_names: list[str]) -> pd.DataFrame:
+def _fetch_parent_runs(
+    experiment_names: list[str],
+    data_quality: str | None = None,
+    show_all: bool = False,
+) -> pd.DataFrame:
     """Return a DataFrame of parent runs across the given experiments.
 
-    Filters on ``tags.enercast.run_type = 'parent'``. Returns the raw
-    ``mlflow.search_runs`` output (pandas DataFrame).
+    Filters on ``tags.enercast.run_type = 'parent'``. When *show_all* is False
+    and *data_quality* is set, also filters on ``enercast.data_quality``.
+    Returns the raw ``mlflow.search_runs`` output (pandas DataFrame).
     """
+    filter_str = "tags.`enercast.run_type` = 'parent'"
+    if not show_all and data_quality:
+        filter_str += f" AND tags.`enercast.data_quality` = '{data_quality}'"
     df = mlflow.search_runs(
         experiment_names=experiment_names,
-        filter_string="tags.`enercast.run_type` = 'parent'",
+        filter_string=filter_str,
         output_format="pandas",
     )
     assert isinstance(df, pd.DataFrame)
@@ -185,7 +193,7 @@ def _add_skill_vs_baseline(runs: pd.DataFrame, horizons: list[int]) -> str | Non
     practice the ratio is nearly identical across the two (Gaussian residuals
     give RMSE/MAE ≈ 1.25 uniformly) and the MAE fallback unblocks runs that
     only logged ``h{n}_mae`` on the parent. Future runs should bubble
-    ``h{n}_rmse`` too — see ``scripts/train.py`` and ``scripts/train_autogluon.py``.
+    ``h{n}_rmse`` too — see ``scripts/train.py``.
 
     Interpretation:
 
@@ -341,6 +349,17 @@ def main() -> None:
         default=None,
         help="Base output path. Default: reports/comparison_<first-experiment>.png",
     )
+    parser.add_argument(
+        "--data-quality",
+        default="CLEAN",
+        help="Filter by enercast.data_quality tag. Default: CLEAN",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        dest="show_all",
+        help="Show all runs regardless of data_quality tag",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -352,7 +371,11 @@ def main() -> None:
     mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
     logger.info("MLflow tracking URI: %s", settings.mlflow_tracking_uri)
 
-    runs_raw = _fetch_parent_runs(args.experiment)
+    runs_raw = _fetch_parent_runs(
+        args.experiment,
+        data_quality=args.data_quality,
+        show_all=args.show_all,
+    )
     if runs_raw.empty:
         logger.error(
             "No parent runs found in %s. Did you tag runs with enercast.run_type='parent'?",
