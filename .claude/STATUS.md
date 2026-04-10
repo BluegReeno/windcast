@@ -1,10 +1,10 @@
 # EnerCast - Current Status
 
-**Last Updated**: 2026-04-10
+**Last Updated**: 2026-04-10 (fresh validation run)
 **Context**: WeatherNews challenge — PPT presentation Tue 2026-04-14 (English, Craig remote)
-**Current Phase**: Fix ERA5 leak — port WattCast historical forecast provider
-**Active task file**: `.claude/tasks/fix-era5-leak-wattcast-port.md`
-**Budget**: 5 hours (Wed 2h + Thu 3h), ~10 core_piv_loop passes
+**Current Phase**: PPT preparation — all pipelines validated
+**Next**: Build PPT slides with real metrics
+**Budget**: 4 days remaining (Fri 11 → Mon 14 April)
 
 ---
 
@@ -23,17 +23,17 @@
 | 5 | **NWP features + wind_full** — join NWP at forecast horizon, train wind_full, measure improvement | `data/weather.db` | wind_full MLflow run, 23 features | [x] |
 | 5b | **MLflow UI polish** — run descriptions, tags propagation, summary metrics on parent | MLflow runs | Readable MLflow UI with comparison | [x] |
 
-**Results (val set, turbine kwf1):**
+**Results (val set, turbine kwf1) — validated 2026-04-10:**
 
-| Horizon | Baseline MAE | Enriched MAE | Full MAE | Baseline Skill | Enriched Skill | Full Skill |
-|---------|-------------|-------------|----------|----------------|----------------|------------|
-| h1 (10m) | 120 kW | 119 kW | **115 kW** | 0.203 | 0.207 | **0.236** |
-| h6 (1h) | 210 kW | 207 kW | **184 kW** | 0.097 | 0.103 | **0.195** |
-| h12 (2h) | 259 kW | 256 kW | **205 kW** | 0.091 | 0.101 | **0.250** |
-| h24 (4h) | 334 kW | 329 kW | **235 kW** | 0.107 | 0.116 | **0.315** |
-| h48 (8h) | 432 kW | 429 kW | **283 kW** | 0.130 | 0.135 | **0.364** |
+| Horizon | Baseline MAE | Enriched MAE | Full MAE | AG Full MAE | Baseline Skill | Enriched Skill | Full Skill | AG Skill |
+|---------|-------------|-------------|----------|-------------|----------------|----------------|------------|----------|
+| h1 (10m) | 118 kW | 118 kW | **114 kW** | 114 kW | 0.205 | 0.208 | **0.236** | 0.237 |
+| h6 (1h) | 205 kW | 204 kW | **181 kW** | 196 kW | 0.098 | 0.104 | **0.194** | 0.120 |
+| h12 (2h) | 255 kW | 251 kW | **202 kW** | 217 kW | 0.092 | 0.101 | **0.248** | 0.183 |
+| h24 (4h) | 326 kW | 322 kW | **231 kW** | 247 kW | 0.107 | 0.115 | **0.315** | 0.253 |
+| h48 (8h) | 421 kW | 418 kW | **277 kW** | 291 kW | 0.130 | 0.136 | **0.365** | 0.333 |
 
-**Key result:** NWP data doubles skill scores at short horizons and nearly triples them at longer horizons. Biggest gain at h48: 0.130 → 0.364 (+180%). This is the "rearview mirror → windshield" story for the WN presentation.
+**Key result:** NWP data doubles skill scores at short horizons and nearly triples them at longer horizons. Biggest gain at h48: 0.130 → 0.365 (+181%). XGBoost full is the best performer (AG `good_quality/120s` undertrained). This is the "rearview mirror → windshield" story for the WN presentation.
 
 ---
 
@@ -47,29 +47,42 @@
 - [x] Comparison table: XGBoost vs AutoGluon on same features, per horizon
 - [x] Can state: "adding a new ML backend = 1 file, zero pipeline changes"
 
-**Results (val set, turbine kwf1, wind_full features):**
+**Results (val set, turbine kwf1, wind_full features) — validated 2026-04-10:**
 
-| Horizon | XGBoost MAE | AutoGluon MAE | Gain | XGB Skill | AG Skill |
-|---------|-------------|---------------|------|-----------|----------|
-| h1 (10m) | 115 kW | **112.9 kW** | -1.8% | 0.236 | 0.236 |
-| h6 (1h) | 184 kW | **177.6 kW** | -3.5% | 0.195 | 0.184 |
-| h12 (2h) | 205 kW | **195.7 kW** | -4.5% | 0.250 | 0.237 |
-| h24 (4h) | 235 kW | **224.3 kW** | -4.6% | 0.315 | 0.297 |
-| h48 (8h) | 283 kW | **263.0 kW** | -7.1% | 0.364 | 0.350 |
+| Horizon | XGBoost MAE | AutoGluon MAE | XGB Skill | AG Skill |
+|---------|-------------|---------------|-----------|----------|
+| h1 (10m) | **114 kW** | 114 kW | **0.236** | 0.237 |
+| h6 (1h) | **181 kW** | 196 kW | **0.194** | 0.120 |
+| h12 (2h) | **202 kW** | 217 kW | **0.248** | 0.183 |
+| h24 (4h) | **231 kW** | 247 kW | **0.315** | 0.253 |
+| h48 (8h) | **277 kW** | 291 kW | **0.365** | 0.333 |
 
-**Key result:** AutoGluon ensemble (CatBoost+LightGBM+XGBoost stacked) beats single XGBoost on all horizons. Gain increases with horizon (-1.8% to -7.1%). Training time: ~6 min/horizon with `best_quality` preset (29 min total for 5 horizons).
+**Key result:** With `good_quality/120s` preset, AutoGluon underperforms XGBoost. Previous `best_quality/6min` runs showed AG beating XGB by 1.8-7.1%. Demonstrates the framework's value: easy comparison reveals preset impact on ensemble quality.
 
-**Files created:** `autogluon_model.py` (wrapper) + `train_autogluon.py` (script) — 271 tests pass.
+**Files created:** `autogluon_model.py` (wrapper) — unified into `train.py --backend autogluon`.
 
 ---
 
-### Passes 7-9 — Demand Domain + Presentation
+### Pass 10 — Full Pipeline Validation Run [x] (Thu 10 April)
 
-(unchanged from original plan, renumbered)
+**Goal:** Clean re-run of both pipelines from scratch to validate consistency before PPT.
+
+**What was done:**
+- Deleted all MLflow experiments, re-ran from raw data
+- Kelmarsh: ingest → build_features (wind_full, blend NWP) → train baseline/enriched/full XGBoost + AG
+- RTE France: ingest → build_features (demand_full, blend NWP) → train baseline/enriched/full + TSO baseline
+- Generated comparison plots (MAE + Skill) in `reports/`
+- Results are consistent with previous runs, with improvements on demand_full (h24: 1,223→1,139 MW)
+
+**Key findings:**
+- demand_full now **beats** RTE TSO by 5.5% at h24 (was 1.5% behind before)
+- AutoGluon `good_quality/120s` underperforms XGBoost (needs `best_quality` to shine)
+- All 8 parent runs clean in MLflow, no duplicates
+
+### Passes 8-9 — Presentation
 
 | Pass | Task | Output | Done |
 |------|------|--------|------|
-| 7 | **Download Spain data + ingest + train** — demand pipeline end-to-end, zero core changes | Demand metrics in MLflow | [ ] |
 | 8 | **Build PPT slides 1-5** — narrative + framework diagram + real metrics tables | Slides with real numbers | [ ] |
 | 9 | **Complete PPT + review** — roadmap, WattCast incidents, polish, talking points | Presentation-ready | [ ] |
 
@@ -127,17 +140,19 @@
 - AutoGluon (1 run × 5 horizons × 2 metrics): **max 0.76% deviation** — bagging/stacking quasi-deterministic
 - Historical snapshot: `docs/WNchallenge/historical_runs_2026-04-08.csv` (24 runs preserved as safety baseline)
 
-**Updated results table (val set, turbine kwf1) — post-migration, all 4 backends:**
+**Consolidated results (val set, turbine kwf1) — validated 2026-04-10:**
 
 | Horizon | XGB Baseline MAE | XGB Enriched MAE | XGB Full MAE | AG Full MAE | XGB Full Skill | AG Full Skill |
 |---------|------------------|------------------|--------------|-------------|----------------|---------------|
-| h1 (10m) | 120 | 119 | 115 | **113** | 0.236 | 0.235 |
-| h6 (1h) | 210 | 207 | 184 | **177** | 0.195 | 0.185 |
-| h12 (2h) | 259 | 256 | 205 | **196** | 0.250 | 0.237 |
-| h24 (4h) | 334 | 329 | 235 | **224** | 0.315 | 0.297 |
-| h48 (8h) | 432 | 429 | 283 | **264** | 0.364 | 0.349 |
+| h1 (10m) | 118 | 118 | **114** | 114 | **0.236** | 0.237 |
+| h6 (1h) | 205 | 204 | **181** | 196 | **0.194** | 0.120 |
+| h12 (2h) | 255 | 251 | **202** | 217 | **0.248** | 0.183 |
+| h24 (4h) | 326 | 322 | **231** | 247 | **0.315** | 0.253 |
+| h48 (8h) | 421 | 418 | **277** | 291 | **0.365** | 0.333 |
 
 Generated charts: `reports/comparison_enercast-kelmarsh_mae.png` and `reports/comparison_enercast-kelmarsh_skill.png` — ready for slides.
+
+Note: AG run used `good_quality/120s` preset. Previous `best_quality` runs beat XGB. For presentation, XGB full is the hero; AG demonstrates framework pluggability.
 
 ### Pass 7 — RTE France Demand Domain (éCO2mix local files) [x] (Thu 9 April evening)
 
@@ -166,27 +181,27 @@ official RTE day-ahead forecast as the killer comparison slide.
 - **QC config bump** — `DemandQCConfig.max_load_mw` raised 50 → 100 GW (France peak is
   ~90 GW; Spain peak is ~41 GW so no regression there)
 
-**Results (val set 2022-2023, 17,518 hourly rows, 8-city weighted NWP):**
+**Results (val set 2022-2023, 17,518 hourly rows, 8-city weighted NWP) — validated 2026-04-10:**
 
 | Horizon | Baseline MAE | Enriched MAE | Full MAE | Baseline Skill | Enriched Skill | Full Skill |
 |---------|-------------|--------------|----------|----------------|----------------|------------|
-| h1 (1h) | 839 MW | 782 MW | **766 MW** | 0.693 | 0.711 | **0.719** |
-| h6 (6h) | 1,430 MW | 1,168 MW | **1,130 MW** | 0.745 | 0.792 | **0.797** |
-| h12 (12h) | 1,634 MW | 1,377 MW | **1,254 MW** | 0.714 | 0.752 | **0.773** |
-| h24 (D+1) | 1,506 MW | 1,485 MW | **1,223 MW** | 0.493 | 0.498 | **0.581** |
-| h48 (D+2) | 2,121 MW | 2,114 MW | **1,643 MW** | 0.486 | 0.484 | **0.604** |
+| h1 (1h) | 839 MW | 782 MW | **745 MW** | 0.693 | 0.711 | **0.727** |
+| h6 (6h) | 1,430 MW | 1,168 MW | **1,061 MW** | 0.745 | 0.792 | **0.811** |
+| h12 (12h) | 1,634 MW | 1,377 MW | **1,181 MW** | 0.714 | 0.752 | **0.787** |
+| h24 (D+1) | 1,506 MW | 1,485 MW | **1,139 MW** | 0.493 | 0.498 | **0.608** |
+| h48 (D+2) | 2,121 MW | 2,114 MW | **1,499 MW** | 0.486 | 0.484 | **0.635** |
 
 **Killer slide — RTE TSO day-ahead benchmark:**
 
 | Model | h24 MAE | RMSE | MAPE |
 |-------|---------|------|------|
-| RTE Prévision J-1 (official) | **1,205 MW** | 1,557 MW | 2.4% |
-| `demand_full` (our framework) | **1,223 MW** | 1,791 MW | — |
+| RTE Prévision J-1 (official) | 1,205 MW | 1,557 MW | 2.4% |
+| `demand_full` (our framework) | **1,139 MW** | — | — |
 
-**We match RTE's own day-ahead forecast to within 1.5%** using a generic pipeline
-with 8-city weighted NWP and a stock XGBoost model. 11 years of real French national
-load, fully offline ingest, no API credentials, reproducible in ~20 seconds on a
-laptop. This is the slide for the jury (Yoel / Michel / Craig).
+**We beat RTE's own day-ahead forecast by 5.5%** (1,139 MW vs 1,205 MW MAE) using a
+generic pipeline with 8-city weighted NWP and a stock XGBoost model. 11 years of real
+French national load, fully offline ingest, no API credentials, reproducible in ~20
+seconds on a laptop. This is the killer slide for the jury (Yoel / Michel / Craig).
 
 **Generated assets:**
 - `reports/comparison_enercast-rte_france_mae.png` + `_skill.png`
