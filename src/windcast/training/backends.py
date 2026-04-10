@@ -52,6 +52,27 @@ class XGBoostBackend:
     def log_child_artifacts(self, model: Any, horizon: int) -> None:
         pass
 
+    def log_model(
+        self,
+        model: Any,
+        X_val: pl.DataFrame,
+        y_pred: np.ndarray,
+        horizon: int,
+    ) -> str | None:
+        import mlflow.xgboost  # pyright: ignore[reportPrivateImportUsage]
+        from mlflow.models import infer_signature
+
+        X_pd = X_val.to_pandas()
+        sig = infer_signature(X_pd, y_pred)
+        artifact_name = f"model_h{horizon:02d}"
+        info = mlflow.xgboost.log_model(  # pyright: ignore[reportPrivateImportUsage]
+            xgb_model=model,
+            name=artifact_name,
+            signature=sig,
+            input_example=X_pd.head(5),
+        )
+        return info.model_uri  # type: ignore[union-attr]
+
     def describe_model(self, model: Any) -> str:
         best_iter = getattr(model, "best_iteration", "?")
         return f"Trees: {best_iter}"
@@ -113,6 +134,31 @@ class AutoGluonBackend:
             best_model = lb.iloc[0]["model"]
             n_models = len(lb)
             mlflow.log_params({"n_ag_models": n_models, "best_ag_model": best_model})
+
+    def log_model(
+        self,
+        model: Any,
+        X_val: pl.DataFrame,
+        y_pred: np.ndarray,
+        horizon: int,
+    ) -> str | None:
+        import mlflow.pyfunc
+        from mlflow.models import infer_signature
+
+        from windcast.models.autogluon_pyfunc import AutoGluonPyfuncWrapper
+
+        X_pd = X_val.to_pandas()
+        sig = infer_signature(X_pd, y_pred)
+        artifact_name = f"model_h{horizon:02d}"
+
+        info = mlflow.pyfunc.log_model(
+            name=artifact_name,
+            python_model=AutoGluonPyfuncWrapper(),
+            artifacts={"ag_predictor": model.path},
+            signature=sig,
+            input_example=X_pd.head(5),
+        )
+        return info.model_uri  # type: ignore[union-attr]
 
     def describe_model(self, model: Any) -> str:
         lb = model.leaderboard(data=None, silent=True)

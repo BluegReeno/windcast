@@ -51,6 +51,16 @@ class TrainingBackend(Protocol):
         """Log backend-specific artifacts on the child run (e.g., AG leaderboard)."""
         ...
 
+    def log_model(
+        self,
+        model: Any,
+        X_val: pl.DataFrame,
+        y_pred: np.ndarray,
+        horizon: int,
+    ) -> str | None:
+        """Log model artifact to MLflow with signature. Returns model URI or None."""
+        ...
+
     def describe_model(self, model: Any) -> str:
         """One-line model description for Markdown notes."""
         ...
@@ -166,6 +176,8 @@ def run_training(
     change_reason: str | None = None,
     train_years: int | None = None,
     val_years: int | None = None,
+    log_models: bool = True,
+    register_model_name: str | None = None,
 ) -> None:
     """Run the full training pipeline for any backend.
 
@@ -291,6 +303,8 @@ def run_training(
 
         results_summary: list[str] = []
         horizon_metrics: dict[int, dict[str, float]] = {}
+        best_model_uri: str | None = None
+        best_mae: float = float("inf")
 
         for h in horizons:
             logger.info("=== Horizon h=%d (%s) ===", h, horizon_descs[h])
@@ -384,8 +398,14 @@ def run_training(
                 }
 
                 backend.log_child_artifacts(model, h)
+                model_uri = None
+                if log_models:
+                    model_uri = backend.log_model(model, X_val, y_pred, h)
 
                 mae = metrics["mae"]
+                if model_uri and mae < best_mae:
+                    best_mae = mae
+                    best_model_uri = model_uri
                 rmse = metrics["rmse"]
                 skill = metrics.get("skill_score", float("nan"))
                 bias = metrics.get("bias", float("nan"))
@@ -465,6 +485,16 @@ def run_training(
                 for k, v in child.data.metrics.items():
                     if k.startswith("h") and ("_mae" in k or "_rmse" in k or "_skill_score" in k):
                         mlflow.log_metric(k, v)
+
+        if register_model_name and log_models and best_model_uri:
+            mv = mlflow.register_model(best_model_uri, register_model_name)
+            client.set_registered_model_alias(register_model_name, "champion", str(mv.version))
+            logger.info(
+                "Registered model %s version %s (MAE=%.1f)",
+                register_model_name,
+                mv.version,
+                best_mae,
+            )
 
         summary_text = "\n".join(results_summary)
         parent_desc = (

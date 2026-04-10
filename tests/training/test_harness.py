@@ -189,6 +189,15 @@ class MockBackend:
     def log_child_artifacts(self, model: Any, horizon: int) -> None:
         pass
 
+    def log_model(
+        self,
+        model: Any,
+        X_val: pl.DataFrame,
+        y_pred: np.ndarray,
+        horizon: int,
+    ) -> str | None:
+        return f"models:/mock-model-h{horizon:02d}"
+
     def describe_model(self, model: Any) -> str:
         return "MockModel"
 
@@ -241,6 +250,7 @@ def test_run_training_mock_backend(_wind_features_parquet, tmp_path):
             data_quality="CLEAN",
             train_years=8,
             val_years=2,
+            log_models=False,
         )
 
     # Verify MLflow run was created with correct tags

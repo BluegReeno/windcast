@@ -92,7 +92,7 @@
 
 | Pass | Task | Input | Output | Done |
 |------|------|-------|--------|------|
-| 11 | **Model Registry** — `log_model()` + `ModelSignature` in XGBoost/AutoGluon backends, register to MLflow Registry | `training/backends.py` | `mlflow models serve` works, `curl /invocations` returns predictions | [ ] |
+| 11 | **Model Registry** — `log_model()` + `ModelSignature` in XGBoost/AutoGluon backends, register to MLflow Registry | `training/backends.py` | `mlflow models serve` works, `curl /invocations` returns predictions | [x] |
 | 12 | **Inference pipeline** — `scripts/inference.py`: fetch Open-Meteo forecast NWP → build features → POST `/invocations` → structured JSON output | Pass 11 | `uv run python scripts/inference.py --date 2026-04-14 --horizon 24` returns forecast | [ ] |
 | 13 | **Streamlit dashboard** — `app/dashboard.py`: domain/date/horizon picker → inference → forecast line chart + model metadata | Pass 12 | `streamlit run app/dashboard.py` — live demo for WN presentation | [ ] |
 
