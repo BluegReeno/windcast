@@ -88,7 +88,7 @@ src/windcast/
 ├── config.py                # Pydantic Settings + dataset configs
 ├── data/                    # Data ingestion & QC
 │   ├── schema.py            # Wind SCADA schema (15 cols)
-│   ├── demand_schema.py     # Demand schema (11 cols)
+│   ├── demand_schema.py     # Demand schema (12 cols)
 │   ├── solar_schema.py      # Solar schema (10 cols)
 │   ├── kelmarsh.py          # Wind parser (Kelmarsh v4)
 │   ├── spain_demand.py      # Demand parser (ENTSO-E)
@@ -104,16 +104,21 @@ src/windcast/
 │   └── solar.py             # Solar-specific features
 ├── models/                  # ML models (domain-agnostic)
 │   ├── xgboost_model.py     # XGBoost trainer
-│   ├── mlforecast_model.py  # mlforecast (Nixtla) trainer
+│   ├── autogluon_model.py   # AutoGluon-Tabular ensemble
+│   ├── mlforecast_model.py  # mlforecast (Nixtla) — separate training path
 │   ├── persistence.py       # Naive persistence benchmark
 │   └── evaluation.py        # Metrics, skill scores, regime analysis
+├── training/                # Unified training harness
+│   ├── harness.py           # TrainingBackend Protocol + run_training()
+│   ├── backends.py          # XGBoostBackend + AutoGluonBackend
+│   └── lineage.py           # MLflow lineage tags
 └── tracking/
     └── mlflow_utils.py      # MLflow logging utilities
 ```
 
 ## Tech Stack
 
-Python 3.12+ · uv · Polars · XGBoost · LightGBM · mlforecast (Nixtla) · scikit-learn · MLflow · Optuna · Open-Meteo · pytest · ruff · pyright
+Python 3.12+ · uv · Polars · XGBoost · AutoGluon-Tabular · LightGBM · mlforecast (Nixtla) · scikit-learn · MLflow · Optuna · Open-Meteo · pytest · ruff · pyright
 
 ## Quality
 

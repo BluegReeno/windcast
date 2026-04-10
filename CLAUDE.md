@@ -23,7 +23,7 @@
 | **Language** | Python 3.12+ | ML ecosystem |
 | **Package manager** | uv | Fast, lockfile-based |
 | **Data processing** | Polars (primary) | 10-min SCADA data |
-| **ML models** | XGBoost, LightGBM, scikit-learn | Quantile regression |
+| **ML models** | XGBoost, AutoGluon-Tabular, LightGBM, scikit-learn | 2 backends via Protocol |
 | **Experiment tracking** | MLflow | Model registry, comparison UI |
 | **Hyperparameter tuning** | Optuna | Bayesian optimization |
 | **Weather data** | Open-Meteo | Free NWP forecasts |

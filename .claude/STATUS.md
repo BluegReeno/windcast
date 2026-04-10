@@ -39,7 +39,7 @@
 
 ### Pass 6 — AutoGluon-Tabular Backend + Final Comparison [x]
 
-**Goal:** Add AutoGluon-Tabular as 3rd ML backend (WN's own tool). Train on wind_full features, compare XGBoost vs AutoGluon ensemble. This shows framework pluggability with WN's actual stack.
+**Goal:** Add AutoGluon-Tabular as 2nd ML backend (WN's own tool) via the Backend Protocol. Train on wind_full features, compare XGBoost vs AutoGluon ensemble. This shows framework pluggability with WN's actual stack.
 
 **Exit criteria:**
 - [x] AutoGluon backend works with same feature Parquets as XGBoost
@@ -91,16 +91,17 @@
 ## What's DONE (Phases 1-3)
 
 ### Framework (code complete, tested, never run on real data)
-- [x] 3 domain schemas (wind 15-col, demand 11-col, solar 10-col)
-- [x] 3 parsers (Kelmarsh, Spain ENTSO-E, PVDAQ System 4)
+- [x] 3 domain schemas (wind 15-col, demand 12-col, solar 10-col)
+- [x] 4 parsers (Kelmarsh, Spain ENTSO-E, RTE France, PVDAQ System 4)
 - [x] 3 QC pipelines (wind 9 rules, demand, solar)
-- [x] 18 feature sets (3 domains x 3 levels x 2 backends)
-- [x] 2 ML backends (XGBoost manual + mlforecast/Nixtla)
+- [x] 18 feature sets (3 domains × 3 levels × 2 variants: standard + exogenous-only)
+- [x] 2 ML backends via Backend Protocol (XGBoost + AutoGluon-Tabular) + mlforecast as separate training path
+- [x] Unified training harness with `TrainingBackend` Protocol + parent/child MLflow runs
 - [x] Evaluation (MAE, RMSE, MAPE, skill score, bias, regime analysis)
-- [x] MLflow tracking integration
+- [x] MLflow tracking integration (SQLite backend)
 - [x] Persistence baseline
-- [x] 267 tests passing, ruff + pyright clean
-- [x] 7 CLI scripts covering full pipeline
+- [x] 322 tests passing, ruff + pyright clean
+- [x] 13 CLI scripts covering full pipeline
 
 ### Weather & NWP Integration (Passes 4-5)
 - [x] WeatherProvider protocol + OpenMeteoProvider

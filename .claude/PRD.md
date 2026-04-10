@@ -87,17 +87,18 @@ What they need to see:
 - ✅ QC pipeline — 9 rules (DONE)
 - ✅ Wind feature sets (baseline: lags + rolling stats, enriched: V3 + stability, full: + NWP)
 - ✅ Open-Meteo NWP client (DONE)
-- ✅ XGBoost + persistence benchmark, skill scores
+- ✅ XGBoost + AutoGluon + persistence benchmark, skill scores
 
-**Demand Domain (Spain ENTSO-E via Kaggle):**
+**Demand Domain (RTE France éCO2mix + Spain ENTSO-E):**
+- ✅ RTE France parser (11y national load, 8-city weighted NWP, TSO benchmark)
 - ✅ Spain demand parser (hourly load + weather + prices, CC0)
-- ✅ Demand schema (timestamp, load_mw, temperature, wind_speed, price_eur)
+- ✅ Demand schema (12 columns, incl. tso_forecast_mw)
 - ✅ Demand QC (outlier detection, holiday handling, gap-fill)
-- ✅ Demand feature sets (baseline: lags H-1/D-1/W-1 + calendar, enriched: + temperature + rolling, full: + weather ensemble)
+- ✅ Demand feature sets (baseline: lags H-1/D-1/W-1 + calendar, enriched: + rolling + holiday, full: + NWP at horizon + HDD/CDD)
 - ✅ XGBoost + persistence benchmark, MAPE, skill scores
 
 **Solar Domain (PVDAQ — stretch goal):**
-- ✅ PVDAQ System 2 parser (NREL, Golden CO, CC-BY)
+- ✅ PVDAQ System 4 parser (NREL, CC-BY)
 - ✅ Solar schema (timestamp, power_kw, ghi, temperature, etc.)
 - ✅ Solar feature sets (baseline: irradiance + lags, enriched: + clearsky ratio + temperature)
 - ✅ Same train/evaluate pipeline, MLflow comparison
@@ -169,10 +170,16 @@ enercast/                               # (currently src/windcast/, rename later
 ├── models/                             # ML models
 │   ├── persistence.py                  # Naive benchmark (any domain)
 │   ├── xgboost_model.py               # XGBoost (any domain)
+│   ├── autogluon_model.py             # AutoGluon-Tabular ensemble
 │   └── evaluation.py                   # Metrics, skill scores, analysis
 │
+├── training/                           # Unified training harness
+│   ├── harness.py                      # TrainingBackend Protocol + run_training()
+│   ├── backends.py                     # XGBoostBackend + AutoGluonBackend
+│   └── lineage.py                      # MLflow lineage tags
+│
 └── tracking/                           # MLflow integration
-    └── mlflow.py                       # Logging, comparison utilities
+    └── mlflow_utils.py                 # Logging, comparison utilities
 ```
 
 ### Key Design Patterns
@@ -183,7 +190,7 @@ enercast/                               # (currently src/windcast/, rename later
 
 3. **Feature set registry** — Named feature sets per domain, defined declaratively. Models request a set by name.
 
-4. **Model-agnostic training** — Train loop accepts any scikit-learn-compatible model. Swap XGBoost for LightGBM or a new model with zero pipeline changes.
+4. **Backend Protocol** — `TrainingBackend` defines a 7-method interface (train, predict, mlflow_setup, etc.). Adding a new ML backend = implement the Protocol in one file, zero pipeline changes. Current backends: XGBoost, AutoGluon-Tabular.
 
 5. **Pluggable metrics** — Evaluation accepts custom metric functions. "Accuracy when spot price > X" = one lambda.
 
@@ -233,6 +240,7 @@ Clean Parquet (data/processed/)
 | `wind_speed_ms` | `Float64` | m/s | Wind speed |
 | `humidity_pct` | `Float64` | % | Relative humidity |
 | `price_eur_mwh` | `Float64` | EUR/MWh | Day-ahead spot price (if available) |
+| `tso_forecast_mw` | `Float64` | MW | TSO day-ahead forecast (if available) |
 | `is_holiday` | `Boolean` | — | Public holiday flag |
 | `is_dst_transition` | `Boolean` | — | DST change flag |
 | `qc_flag` | `UInt8` | — | QC result (0=ok, 1=suspect, 2=bad) |
@@ -291,8 +299,9 @@ Clean Parquet (data/processed/)
 | **Language** | Python | 3.12+ | ML ecosystem |
 | **Package manager** | uv | latest | Fast, lockfile-based |
 | **Data processing** | Polars | >=1.0 | Primary. No pandas. |
-| **ML** | XGBoost | >=2.0 | Quantile regression |
-| **ML** | LightGBM | >=4.0 | Comparison |
+| **ML** | XGBoost | >=2.0 | Primary backend |
+| **ML** | AutoGluon-Tabular | >=1.2 | Ensemble backend (CatBoost+LightGBM+XGBoost) |
+| **ML** | LightGBM | >=4.0 | Used by AutoGluon ensemble |
 | **ML utilities** | scikit-learn | >=1.4 | Metrics, preprocessing |
 | **Experiment tracking** | MLflow | >=2.10 | File-based tracking |
 | **Weather data** | Open-Meteo | latest | Free NWP, no API key |
@@ -334,13 +343,15 @@ No secrets required (all datasets are open, Open-Meteo is free).
 | Domain | Dataset | Source | Resolution | Period | License |
 |--------|---------|--------|-----------|--------|---------|
 | **Wind** | Kelmarsh v4 | Zenodo | 10 min | 2016-2024 | CC-BY |
+| **Demand** | RTE France éCO2mix | RTE (local ZIP) | 1h (resampled) | 2014-2024 | Open |
 | **Demand** | Spain Energy+Weather | Kaggle (ENTSO-E) | 1h | 2015-2018 | CC0 |
-| **Solar** | PVDAQ System 2 | NREL/AWS S3 | 15 min | 2005-present | CC-BY 4.0 |
+| **Solar** | PVDAQ System 4 | NREL/AWS S3 | 15 min | 2005-present | CC-BY 4.0 |
 
 ### Why These Datasets
 
 - **Kelmarsh**: Already integrated, 6 turbines, clean SCADA, proves wind pipeline
-- **Spain**: Demand + weather + prices in one file, CC0, zero-friction download, 4 MB
+- **RTE France**: 11 years of real national load, includes TSO day-ahead forecast for benchmarking, 8-city weighted NWP
+- **Spain**: 2nd demand reference implementation, confirms schema abstraction is multi-dataset capable
 - **PVDAQ**: Longest open PV dataset, programmatic access via pvlib, co-located irradiance
 
 ---
@@ -481,8 +492,9 @@ No secrets required (all datasets are open, Open-Meteo is free).
 | Dataset | Access |
 |---------|--------|
 | Kelmarsh v4 | `data/KelmarshV4/16807551.zip` (local) |
+| RTE France éCO2mix | `data/ecomix-rte/eCO2mix_RTE_Annuel-Definitif_*.zip` (local) |
 | Spain Energy+Weather | `kaggle.com/datasets/nicholasjhana/energy-consumption-generation-prices-and-weather` |
-| PVDAQ System 2 | `pvlib.iotools.get_pvdaq_data(system_id=2)` or S3: `s3://oedi-data-lake/pvdaq/` |
+| PVDAQ System 4 | `pvlib.iotools.get_pvdaq_data(system_id=4)` or S3: `s3://oedi-data-lake/pvdaq/` |
 
 ### Original WindCast Scope (preserved for reference)
 
