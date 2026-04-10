@@ -22,17 +22,26 @@ Every hour an engineer spends writing QC scripts, debugging deployment artifacts
 # Install dependencies
 uv sync
 
-# Wind pipeline (Kelmarsh dataset)
+# Wind pipeline (Kelmarsh dataset — default 5/1 train/val split)
 uv run python scripts/ingest_kelmarsh.py        # Parse → QC → Parquet
 uv run python scripts/build_features.py          # Feature engineering
-uv run python scripts/train.py                   # Train → MLflow
+uv run python scripts/train.py                   # Train XGBoost → MLflow
 uv run python scripts/evaluate.py                # Evaluate → MLflow
 
-# Demand pipeline (Spain ENTSO-E dataset) — same scripts, different domain
-uv run python scripts/ingest_spain_demand.py
-uv run python scripts/build_features.py --domain demand --dataset spain_demand
-uv run python scripts/train.py --domain demand --dataset spain_demand
-uv run python scripts/evaluate.py --domain demand --dataset spain_demand
+# Demand pipeline (RTE France — auto 8/2 split from dataset config)
+uv run python scripts/ingest_rte_france.py
+uv run python scripts/build_features.py --domain demand --dataset rte_france
+uv run python scripts/train.py --domain demand --dataset rte_france
+uv run python scripts/log_tso_baseline.py        # RTE day-ahead benchmark
+
+# AutoGluon backend (ensemble of CatBoost+LightGBM+XGBoost)
+uv run python scripts/train.py --backend autogluon --feature-set wind_full
+
+# Override split config via CLI (useful for experiments)
+uv run python scripts/train.py --domain demand --dataset rte_france --train-years 6 --val-years 2
+
+# Compare runs (MAE + Skill bar charts)
+uv run python scripts/compare_runs.py --experiment enercast-kelmarsh
 
 # View results
 mlflow ui
@@ -51,7 +60,8 @@ Zero changes to the core pipeline. The parser is the only dataset-specific code.
 | Domain | Dataset | Source | Resolution | What It Demonstrates |
 |--------|---------|--------|-----------|---------------------|
 | **Wind** | Kelmarsh v4 (6 turbines) | Zenodo | 10 min | SCADA ingestion, power curve modeling, NWP integration |
-| **Demand** | Spain ENTSO-E | Kaggle | 1 hour | Load forecasting, calendar features, MARS replacement |
+| **Demand** | RTE France (11y national load) | éCO2mix | 1 hour | Load forecasting, 8-city weighted NWP, TSO benchmark |
+| **Demand** | Spain ENTSO-E | Kaggle | 1 hour | 2nd reference implementation, calendar features |
 | **Solar** | PVDAQ System 4 | NREL | 15 min | Irradiance-based forecasting, clearsky ratio |
 
 Same pipeline pattern, different parsers and feature configs.
@@ -107,7 +117,7 @@ Python 3.12+ · uv · Polars · XGBoost · LightGBM · mlforecast (Nixtla) · sc
 
 ## Quality
 
-- 234 tests passing
+- 322 tests passing
 - ruff lint + format clean
 - pyright type checking clean
 - Strict temporal train/val/test splits (no data leakage)

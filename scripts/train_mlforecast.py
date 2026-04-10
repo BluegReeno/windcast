@@ -8,13 +8,12 @@ Usage:
 
 import argparse
 import logging
-from datetime import datetime
 from pathlib import Path
 
 import mlflow
 import polars as pl
 
-from windcast.config import get_settings
+from windcast.config import DATASETS, get_settings
 from windcast.features import list_feature_sets
 from windcast.features.exogenous import (
     build_demand_exogenous,
@@ -30,6 +29,7 @@ from windcast.models.mlforecast_model import (
     train_mlforecast,
 )
 from windcast.tracking import log_evaluation_results, log_feature_set, setup_mlflow
+from windcast.training.harness import temporal_split
 
 logger = logging.getLogger(__name__)
 
@@ -38,24 +38,6 @@ EXOG_BUILDERS = {
     "demand": build_demand_exogenous,
     "solar": build_solar_exogenous,
 }
-
-
-def _temporal_split(
-    df: pl.DataFrame,
-    train_years: int,
-    val_years: int,
-) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
-    """Split DataFrame temporally using year-based boundaries on ds column."""
-    ts = df.get_column("ds")
-    start: datetime = ts.min()  # type: ignore[assignment]
-    train_end = start.replace(year=start.year + train_years)
-    val_end = train_end.replace(year=train_end.year + val_years)
-
-    train = df.filter(pl.col("ds") < train_end)
-    val = df.filter((pl.col("ds") >= train_end) & (pl.col("ds") < val_end))
-    test = df.filter(pl.col("ds") >= val_end)
-
-    return train, val, test
 
 
 def main() -> None:
@@ -102,6 +84,18 @@ def main() -> None:
         choices=["recursive", "direct", "sparse_direct"],
         default="sparse_direct",
         help="Forecasting strategy. Default: sparse_direct",
+    )
+    parser.add_argument(
+        "--train-years",
+        type=int,
+        default=None,
+        help="Training split in years. Default: from dataset config",
+    )
+    parser.add_argument(
+        "--val-years",
+        type=int,
+        default=None,
+        help="Validation split in years. Default: from dataset config",
     )
     args = parser.parse_args()
 
@@ -166,8 +160,23 @@ def main() -> None:
     keep_cols = ["unique_id", "ds", "y", *available_exog]
     df_ml = df_ml.select([c for c in keep_cols if c in df_ml.columns])
 
+    # Resolve split config: CLI > dataset config > global settings
+    dataset_cfg = DATASETS.get(dataset)
+    resolved_train_years = (
+        args.train_years
+        or (getattr(dataset_cfg, "train_years", None) if dataset_cfg else None)
+        or settings.train_years
+    )
+    resolved_val_years = (
+        args.val_years
+        or (getattr(dataset_cfg, "val_years", None) if dataset_cfg else None)
+        or settings.val_years
+    )
+
     # Temporal split
-    train_df, val_df, test_df = _temporal_split(df_ml, settings.train_years, settings.val_years)
+    train_df, val_df, test_df = temporal_split(
+        df_ml, resolved_train_years, resolved_val_years, timestamp_col="ds"
+    )
     logger.info(
         "Temporal split: train=%d, val=%d, test=%d", len(train_df), len(val_df), len(test_df)
     )
@@ -209,6 +218,8 @@ def main() -> None:
                 "n_val": len(val_df),
                 "n_test": len(test_df),
                 "backend": "mlforecast",
+                "split.train_years": resolved_train_years,
+                "split.val_years": resolved_val_years,
                 "split.train_start": str(train_df["ds"].min()),
                 "split.train_end": str(train_df["ds"].max()),
                 "split.val_start": str(val_df["ds"].min()),

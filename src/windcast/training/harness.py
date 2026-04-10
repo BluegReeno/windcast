@@ -60,6 +60,7 @@ def temporal_split(
     df: pl.DataFrame,
     train_years: int,
     val_years: int,
+    timestamp_col: str = "timestamp_utc",
 ) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
     """Split DataFrame temporally using year-based boundaries.
 
@@ -68,14 +69,14 @@ def temporal_split(
     - val: next val_years
     - test: remainder
     """
-    ts = df.get_column("timestamp_utc")
+    ts = df.get_column(timestamp_col)
     start: datetime = ts.min()  # type: ignore[assignment]
     train_end = start.replace(year=start.year + train_years)
     val_end = train_end.replace(year=train_end.year + val_years)
 
-    train = df.filter(pl.col("timestamp_utc") < train_end)
-    val = df.filter((pl.col("timestamp_utc") >= train_end) & (pl.col("timestamp_utc") < val_end))
-    test = df.filter(pl.col("timestamp_utc") >= val_end)
+    train = df.filter(pl.col(timestamp_col) < train_end)
+    val = df.filter((pl.col(timestamp_col) >= train_end) & (pl.col(timestamp_col) < val_end))
+    test = df.filter(pl.col(timestamp_col) >= val_end)
 
     return train, val, test
 
@@ -163,6 +164,8 @@ def run_training(
     nwp_source: str = "forecast",
     data_quality: str = "CLEAN",
     change_reason: str | None = None,
+    train_years: int | None = None,
+    val_years: int | None = None,
 ) -> None:
     """Run the full training pipeline for any backend.
 
@@ -184,6 +187,8 @@ def run_training(
     from windcast.training.lineage import log_lineage_tags
 
     settings = get_settings()
+    effective_train_years = train_years if train_years is not None else settings.train_years
+    effective_val_years = val_years if val_years is not None else settings.val_years
     dcfg = DOMAIN_CONFIG[domain]
     target_col = dcfg["target"]
     lag1_col = dcfg["lag1"]
@@ -209,7 +214,7 @@ def run_training(
     if missing_non_nwp:
         logger.warning("Missing feature columns (skipped): %s", sorted(missing_non_nwp))
 
-    train_df, val_df, test_df = temporal_split(df, settings.train_years, settings.val_years)
+    train_df, val_df, test_df = temporal_split(df, effective_train_years, effective_val_years)
     logger.info(
         "Temporal split: train=%d, val=%d, test=%d", len(train_df), len(val_df), len(test_df)
     )
@@ -253,6 +258,8 @@ def run_training(
             "n_train": len(train_df),
             "n_val": len(val_df),
             "n_test": len(test_df),
+            "split.train_years": effective_train_years,
+            "split.val_years": effective_val_years,
             "split.train_start": str(train_df[ts_col].min()),
             "split.train_end": str(train_df[ts_col].max()),
             "split.val_start": str(val_df[ts_col].min()),

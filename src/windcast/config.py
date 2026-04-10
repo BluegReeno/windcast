@@ -17,6 +17,8 @@ class DatasetConfig(BaseModel):
     n_turbines: int
     latitude: float
     longitude: float
+    train_years: int = 5
+    val_years: int = 1
 
 
 KELMARSH = DatasetConfig(
@@ -59,6 +61,8 @@ class DemandDatasetConfig(BaseModel):
     latitude: float
     longitude: float
     timezone: str
+    train_years: int = 5
+    val_years: int = 1
 
 
 SPAIN_DEMAND = DemandDatasetConfig(
@@ -68,6 +72,8 @@ SPAIN_DEMAND = DemandDatasetConfig(
     latitude=40.4168,
     longitude=-3.7038,
     timezone="Europe/Madrid",
+    train_years=2,
+    val_years=1,
 )
 
 RTE_FRANCE = DemandDatasetConfig(
@@ -77,6 +83,8 @@ RTE_FRANCE = DemandDatasetConfig(
     latitude=48.8566,  # Paris
     longitude=2.3522,
     timezone="Europe/Paris",
+    train_years=8,
+    val_years=2,
 )
 
 
@@ -91,6 +99,8 @@ class SolarDatasetConfig(BaseModel):
     latitude: float
     longitude: float
     timezone: str
+    train_years: int = 5
+    val_years: int = 1
 
 
 PVDAQ_SYSTEM4 = SolarDatasetConfig(

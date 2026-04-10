@@ -13,7 +13,7 @@ import argparse
 import logging
 from pathlib import Path
 
-from windcast.config import get_settings
+from windcast.config import DATASETS, get_settings
 from windcast.features import list_feature_sets
 from windcast.training import XGBoostBackend, run_training
 
@@ -62,6 +62,19 @@ def main() -> None:
         nargs="+",
         default=None,
         help="Forecast horizons in steps. Default: from settings",
+    )
+    # Split config
+    parser.add_argument(
+        "--train-years",
+        type=int,
+        default=None,
+        help="Training split in years. Default: from dataset config",
+    )
+    parser.add_argument(
+        "--val-years",
+        type=int,
+        default=None,
+        help="Validation split in years. Default: from dataset config",
     )
     # AutoGluon-specific
     parser.add_argument(
@@ -116,6 +129,19 @@ def main() -> None:
     dataset = args.dataset or domain_dataset_defaults[domain]
     experiment_name = args.experiment_name or f"enercast-{dataset}"
 
+    # Resolve split config: CLI > dataset config > global settings
+    dataset_cfg = DATASETS.get(dataset)
+    resolved_train_years = (
+        args.train_years
+        or (getattr(dataset_cfg, "train_years", None) if dataset_cfg else None)
+        or settings.train_years
+    )
+    resolved_val_years = (
+        args.val_years
+        or (getattr(dataset_cfg, "val_years", None) if dataset_cfg else None)
+        or settings.val_years
+    )
+
     if domain in ("demand", "solar"):
         parquet_path = features_dir / f"{dataset}_features.parquet"
     else:
@@ -144,6 +170,8 @@ def main() -> None:
         nwp_source=args.nwp_source,
         data_quality=args.data_quality,
         change_reason=args.change_reason,
+        train_years=resolved_train_years,
+        val_years=resolved_val_years,
     )
 
 

@@ -7,7 +7,6 @@ Usage:
 
 import argparse
 import logging
-from datetime import datetime
 from pathlib import Path
 
 import mlflow
@@ -15,10 +14,11 @@ import numpy as np
 import polars as pl
 import xgboost as xgb
 
-from windcast.config import get_settings
+from windcast.config import DATASETS, get_settings
 from windcast.features import get_feature_set, list_feature_sets
 from windcast.models.evaluation import compute_metrics, regime_analysis
 from windcast.tracking import log_dataframe_artifact, log_evaluation_results, setup_mlflow
+from windcast.training.harness import temporal_split
 
 logger = logging.getLogger(__name__)
 
@@ -86,24 +86,6 @@ def _solar_regime_analysis(
         regimes[name] = {"mae": mae, "rmse": rmse, "n_samples": float(len(subset))}
 
     return regimes
-
-
-def _temporal_split(
-    df: pl.DataFrame,
-    train_years: int,
-    val_years: int,
-) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
-    """Split DataFrame temporally (same logic as train.py)."""
-    ts = df.get_column("timestamp_utc")
-    start: datetime = ts.min()  # type: ignore[assignment]
-    train_end = start.replace(year=start.year + train_years)
-    val_end = train_end.replace(year=train_end.year + val_years)
-
-    train = df.filter(pl.col("timestamp_utc") < train_end)
-    val = df.filter((pl.col("timestamp_utc") >= train_end) & (pl.col("timestamp_utc") < val_end))
-    test = df.filter(pl.col("timestamp_utc") >= val_end)
-
-    return train, val, test
 
 
 def _load_models_from_run(run_id: str) -> dict[int, xgb.XGBRegressor]:
@@ -186,6 +168,18 @@ def main() -> None:
         help="MLflow experiment name. Default: enercast-{dataset}",
     )
     parser.add_argument("--run-id", default=None, help="MLflow run ID to evaluate. Default: latest")
+    parser.add_argument(
+        "--train-years",
+        type=int,
+        default=None,
+        help="Training split in years. Default: from dataset config",
+    )
+    parser.add_argument(
+        "--val-years",
+        type=int,
+        default=None,
+        help="Validation split in years. Default: from dataset config",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -247,8 +241,21 @@ def main() -> None:
     df = pl.read_parquet(parquet_path)
     available_cols = [c for c in fs.columns if c in df.columns]
 
+    # Resolve split config: CLI > dataset config > global settings
+    dataset_cfg = DATASETS.get(dataset)
+    resolved_train_years = (
+        args.train_years
+        or (getattr(dataset_cfg, "train_years", None) if dataset_cfg else None)
+        or settings.train_years
+    )
+    resolved_val_years = (
+        args.val_years
+        or (getattr(dataset_cfg, "val_years", None) if dataset_cfg else None)
+        or settings.val_years
+    )
+
     # Get test split
-    _, _, test_df = _temporal_split(df, settings.train_years, settings.val_years)
+    _, _, test_df = temporal_split(df, resolved_train_years, resolved_val_years)
     logger.info("Test set: %d rows", len(test_df))
 
     if len(test_df) == 0:

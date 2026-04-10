@@ -61,6 +61,17 @@ def test_temporal_split_empty_test():
     assert len(test) == 0
 
 
+def test_temporal_split_custom_timestamp_col():
+    """Test temporal_split with a non-default timestamp column (e.g. 'ds')."""
+    df = _make_ts_df(2015, 8)
+    df = df.rename({"timestamp_utc": "ds"})
+    train, val, test = temporal_split(df, train_years=5, val_years=2, timestamp_col="ds")
+    assert len(train) > 0
+    assert len(val) > 0
+    assert len(test) > 0
+    assert len(train) + len(val) + len(test) == len(df)
+
+
 # --- resolve_horizon_features ---
 
 
@@ -212,8 +223,8 @@ def test_run_training_mock_backend(_wind_features_parquet, tmp_path):
 
     with patch("windcast.config.get_settings") as mock_settings:
         mock_settings.return_value.mlflow_tracking_uri = tracking_uri
-        mock_settings.return_value.train_years = 8
-        mock_settings.return_value.val_years = 2
+        mock_settings.return_value.train_years = 5
+        mock_settings.return_value.val_years = 1
         mock_settings.return_value.features_dir = _wind_features_parquet
 
         run_training(
@@ -228,6 +239,8 @@ def test_run_training_mock_backend(_wind_features_parquet, tmp_path):
             generation="gen_test",
             nwp_source="forecast",
             data_quality="CLEAN",
+            train_years=8,
+            val_years=2,
         )
 
     # Verify MLflow run was created with correct tags

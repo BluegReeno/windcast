@@ -11,15 +11,15 @@ from __future__ import annotations
 
 import argparse
 import logging
-from datetime import datetime
 from pathlib import Path
 
 import mlflow
 import polars as pl
 
-from windcast.config import get_settings
+from windcast.config import DATASETS, get_settings
 from windcast.models.evaluation import compute_metrics
 from windcast.tracking import setup_mlflow
+from windcast.training.harness import temporal_split
 from windcast.training.lineage import log_lineage_tags
 
 logger = logging.getLogger(__name__)
@@ -38,6 +38,18 @@ def main() -> None:
         "--data-quality", default="CLEAN", help="Data quality: CLEAN or LEAKED. Default: CLEAN"
     )
     parser.add_argument("--change-reason", default=None, help="Free-text change reason")
+    parser.add_argument(
+        "--train-years",
+        type=int,
+        default=None,
+        help="Training split in years. Default: from dataset config",
+    )
+    parser.add_argument(
+        "--val-years",
+        type=int,
+        default=None,
+        help="Validation split in years. Default: from dataset config",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -50,17 +62,19 @@ def main() -> None:
     df = pl.read_parquet(PARQUET_PATH)
     logger.info("Loaded %d rows from %s", len(df), PARQUET_PATH)
 
-    # Mirror the temporal split used by train.py
-    ts = df.get_column("timestamp_utc")
-    start: datetime = ts.min()  # type: ignore[assignment]
-    train_end = start.replace(year=start.year + settings.train_years)
-    val_end = train_end.replace(year=train_end.year + settings.val_years)
+    # Resolve split config: CLI > dataset config > global settings
+    dataset_cfg = DATASETS[DATASET_ID]
+    effective_train_years = args.train_years or dataset_cfg.train_years or settings.train_years
+    effective_val_years = args.val_years or dataset_cfg.val_years or settings.val_years
 
-    val = df.filter(
-        (pl.col("timestamp_utc") >= train_end) & (pl.col("timestamp_utc") < val_end)
-    ).drop_nulls(subset=["load_mw", "tso_forecast_mw"])
-    test = df.filter(pl.col("timestamp_utc") >= val_end).drop_nulls(
-        subset=["load_mw", "tso_forecast_mw"]
+    _, val_raw, test_raw = temporal_split(df, effective_train_years, effective_val_years)
+    val = val_raw.drop_nulls(subset=["load_mw", "tso_forecast_mw"])
+    test = test_raw.drop_nulls(subset=["load_mw", "tso_forecast_mw"])
+
+    # Compute boundaries for logging
+    train_end = val_raw["timestamp_utc"].min()
+    val_end = (
+        test_raw["timestamp_utc"].min() if len(test_raw) > 0 else val_raw["timestamp_utc"].max()
     )
     logger.info("Val set: %d rows (%s → %s)", len(val), train_end, val_end)
     logger.info("Test set: %d rows (>= %s)", len(test), val_end)
@@ -99,6 +113,8 @@ def main() -> None:
                 "dataset": DATASET_ID,
                 "n_val": len(val),
                 "n_test": len(test),
+                "split.train_years": effective_train_years,
+                "split.val_years": effective_val_years,
                 "split.train_end": str(train_end),
                 "split.val_start": str(train_end),
                 "split.val_end": str(val_end),
