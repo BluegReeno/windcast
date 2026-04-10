@@ -307,18 +307,19 @@ def _plot_grouped_bars(
     logger.info("Wrote %s", out_path)
 
 
-def _print_markdown_table(
+def _build_markdown_table(
     runs: pd.DataFrame,
     horizons: list[int],
     has_skill_vs_baseline: bool = False,
-) -> None:
-    """Print a Markdown comparison table to stdout."""
+) -> str:
+    """Build a Markdown comparison table and return it as a string."""
     header = ["Run"] + [f"h{h} MAE" for h in horizons] + [f"h{h} Skill" for h in horizons]
     if has_skill_vs_baseline:
         header += [f"h{h} SkillVsBase" for h in horizons]
-    print("\n## Comparison table\n")
-    print("| " + " | ".join(header) + " |")
-    print("|" + "|".join("---" for _ in header) + "|")
+    lines: list[str] = []
+    lines.append("## Comparison table\n")
+    lines.append("| " + " | ".join(header) + " |")
+    lines.append("|" + "|".join("---" for _ in header) + "|")
     for _, row in runs.iterrows():
         cells = [row["label"]]
         for h in horizons:
@@ -331,8 +332,8 @@ def _print_markdown_table(
             for h in horizons:
                 svb = row.get(f"metrics.h{h}_skill_vs_baseline", float("nan"))
                 cells.append(f"{svb:+.3f}" if pd.notna(svb) else "—")
-        print("| " + " | ".join(cells) + " |")
-    print()
+        lines.append("| " + " | ".join(cells) + " |")
+    return "\n".join(lines) + "\n"
 
 
 def main() -> None:
@@ -438,7 +439,14 @@ def main() -> None:
             draw_zero_line=True,
         )
 
-    _print_markdown_table(runs, horizons, has_skill_vs_baseline=baseline_label is not None)
+    md_table = _build_markdown_table(
+        runs, horizons, has_skill_vs_baseline=baseline_label is not None
+    )
+    print(f"\n{md_table}")
+
+    md_path = base.with_name(base.stem + ".md")
+    md_path.write_text(md_table, encoding="utf-8")
+    logger.info("Wrote %s", md_path)
 
 
 if __name__ == "__main__":
