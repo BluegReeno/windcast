@@ -86,6 +86,33 @@
 | 8 | **Build PPT slides 1-5** — narrative + framework diagram + real metrics tables | Slides with real numbers | [ ] |
 | 9 | **Complete PPT + review** — roadmap, WattCast incidents, polish, talking points | Presentation-ready | [ ] |
 
+### Passes 11-13 — Path to Production (Model Serving + Demo Dashboard)
+
+**Goal:** Close the last mile from experiment to live predictions. Show WN that EnerCast models are deployable, not just trainable. MLflow's built-in FastAPI serving = zero custom server code.
+
+| Pass | Task | Input | Output | Done |
+|------|------|-------|--------|------|
+| 11 | **Model Registry** — `log_model()` + `ModelSignature` in XGBoost/AutoGluon backends, register to MLflow Registry | `training/backends.py` | `mlflow models serve` works, `curl /invocations` returns predictions | [ ] |
+| 12 | **Inference pipeline** — `scripts/inference.py`: fetch Open-Meteo forecast NWP → build features → POST `/invocations` → structured JSON output | Pass 11 | `uv run python scripts/inference.py --date 2026-04-14 --horizon 24` returns forecast | [ ] |
+| 13 | **Streamlit dashboard** — `app/dashboard.py`: domain/date/horizon picker → inference → forecast line chart + model metadata | Pass 12 | `streamlit run app/dashboard.py` — live demo for WN presentation | [ ] |
+
+**Architecture:**
+```
+train.py → MLflow log_model(signature) → Model Registry
+                                              ↓
+                              mlflow models serve -p 5000
+                              (FastAPI: /invocations, /ping)
+                                              ↓
+                              scripts/inference.py (NWP → features → POST)
+                                              ↓
+                              app/dashboard.py (Streamlit — visual demo)
+```
+
+**Key decisions:**
+- MLflow native serving (not custom FastAPI) — model IS the API, same format works on AWS
+- Local demo (not AWS) — controlled for live presentation, AWS = same Docker image
+- Inference script as intermediary — reusable for cron, dashboard, or any consumer
+
 ---
 
 ## What's DONE (Phases 1-3)

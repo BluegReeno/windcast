@@ -464,7 +464,140 @@ No secrets required (all datasets are open, Open-Meteo is free).
 
 ---
 
-## 14. Risks & Mitigations
+## 14. Path to Production — Model Serving
+
+### Vision
+
+Close the last mile: from a trained MLflow experiment to a live REST API returning forecasts. The goal is to demonstrate that the framework doesn't stop at experimentation — a model trained in EnerCast is **deployable with zero custom code**.
+
+MLflow uses **FastAPI as its default serving backend**. A trained model with a logged signature becomes a REST API with one command:
+
+```bash
+mlflow models serve -m models:/enercast-kelmarsh/1 -p 5000
+```
+
+This exposes 4 endpoints out of the box:
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/invocations` | POST | Predictions (JSON input → JSON output) |
+| `/ping` | GET | Health check |
+| `/health` | GET | Health check |
+| `/version` | GET | MLflow version |
+
+Input format (dataframe_split):
+```json
+{
+  "dataframe_split": {
+    "columns": ["wind_speed_ms", "nwp_wind_speed_100m_h6", ...],
+    "data": [[7.5, 8.2, ...]]
+  }
+}
+```
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ EnerCast — Experiment to Production                     │
+│                                                         │
+│  train.py                                               │
+│    → MLflow run + log_model(signature)                  │
+│    → Model Registry (models:/enercast-kelmarsh/1)       │
+│                                                         │
+│  mlflow models serve -m models:/... -p 5000             │
+│    → FastAPI server (/invocations, /ping)               │
+│                                                         │
+│  Streamlit dashboard (port 8501)                        │
+│    ├─ Date picker + horizon selector                    │
+│    ├─ Fetch NWP (Open-Meteo forecast API)               │
+│    ├─ Build features on the fly                         │
+│    ├─ POST /invocations → get predictions               │
+│    └─ Render forecast chart (power vs time)             │
+│                                                         │
+│  Path to AWS (incremental, not built for demo):         │
+│    mlflow models build-docker → ECR → EC2/Fargate       │
+│    Same /invocations endpoint, same input format        │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Implementation Phases
+
+#### Phase 5.1 — Model Registry Integration (Pass 11)
+
+**Goal:** Make trained models servable by logging them with MLflow signatures.
+
+**What changes:**
+- Add `mlflow.pyfunc.log_model()` with `ModelSignature` (input schema from feature columns, output schema = float prediction) in `XGBoostBackend` and `AutoGluonBackend`
+- Register best model to MLflow Model Registry with version tagging
+- Models become loadable via `mlflow.pyfunc.load_model("models:/enercast-kelmarsh/1")`
+
+**Exit criteria:**
+- [ ] `mlflow models serve -m models:/enercast-kelmarsh/1 -p 5000` starts a FastAPI server
+- [ ] `curl -X POST localhost:5000/invocations` returns predictions
+- [ ] Both XGBoost and AutoGluon backends log servable models
+
+#### Phase 5.2 — Inference Pipeline (Pass 12)
+
+**Goal:** Script that fetches fresh NWP and calls the serving endpoint.
+
+**What changes:**
+- `scripts/inference.py` — end-to-end inference script:
+  1. Accept target date + horizon as arguments
+  2. Fetch NWP forecast from Open-Meteo (not ERA5 — real forecast data)
+  3. Build feature vector on the fly using `features/` module
+  4. POST to `/invocations` endpoint
+  5. Return structured JSON with predictions per horizon
+- This script is the building block for any downstream consumer (cron, dashboard, API)
+
+**Exit criteria:**
+- [ ] `uv run python scripts/inference.py --date 2026-04-14 --horizon 24` returns a forecast
+- [ ] Works with both wind and demand domains
+- [ ] Uses Open-Meteo forecast API (not historical ERA5)
+
+#### Phase 5.3 — Streamlit Demo Dashboard (Pass 13)
+
+**Goal:** Visual frontend that consumes the serving endpoint — the live demo for WN.
+
+**What changes:**
+- `app/dashboard.py` — minimal Streamlit app:
+  - Domain selector (Wind / Demand)
+  - Date picker + horizon slider
+  - "Generate Forecast" button → calls inference pipeline → POST to `/invocations`
+  - Line chart: predicted power/load vs time, with confidence context
+  - Sidebar: model metadata from MLflow (feature set, training date, skill score)
+- Runs locally: `streamlit run app/dashboard.py`
+
+**Exit criteria:**
+- [ ] Dashboard shows real-time forecast for a selected date
+- [ ] Works for both Kelmarsh wind and RTE France demand
+- [ ] Visually compelling enough for live demo (chart + key metrics)
+
+### Why This Architecture
+
+| Decision | Rationale |
+|----------|-----------|
+| **MLflow native serving (not custom FastAPI)** | Zero custom server code. The model IS the API. Same format works locally, on EC2, on SageMaker. |
+| **Streamlit (not React/Next.js)** | Python-native, 1 file, same ecosystem. WN's engineers can read and modify it. |
+| **Local demo (not AWS deployment)** | Controlled environment for live demo. AWS = same Docker image, just a `docker push` away. No demo-day risk. |
+| **Inference script as intermediary** | Decouples NWP fetching + feature building from the dashboard. Reusable for cron jobs, CI, or any other consumer. |
+
+### Path to AWS Production (Post-Demo Roadmap)
+
+The local stack maps 1:1 to AWS services — no architecture change, just infrastructure:
+
+| Local | AWS Equivalent | Effort |
+|-------|---------------|--------|
+| `mlflow models serve` | EC2 t2.micro (free tier) or `mlflow models build-docker` → ECS Fargate | 1h |
+| SQLite MLflow backend | RDS PostgreSQL or S3 + managed MLflow (SageMaker) | 2h |
+| Manual `inference.py` | EventBridge + Lambda cron (daily forecast) | 2h |
+| Streamlit on localhost | Streamlit on EC2 or Streamlit Community Cloud (free) | 30min |
+
+**AWS free tier covers the entire stack** for a POC: EC2 t2.micro (750h/month), S3 (5GB), Lambda (1M requests/month), RDS (750h micro).
+
+---
+
+## 15. Risks & Mitigations
 
 | # | Risk | Impact | Mitigation |
 |---|------|--------|------------|
@@ -476,7 +609,7 @@ No secrets required (all datasets are open, Open-Meteo is free).
 
 ---
 
-## 15. Appendix
+## 16. Appendix
 
 ### Key Documents
 
