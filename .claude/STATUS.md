@@ -1,8 +1,9 @@
 # EnerCast - Current Status
 
-**Last Updated**: 2026-04-09
-**Context**: WeatherNews challenge — PPT presentation next week (English, Craig remote)
-**Current Phase**: Phase 4 — Run pipelines + build presentation
+**Last Updated**: 2026-04-10
+**Context**: WeatherNews challenge — PPT presentation Tue 2026-04-14 (English, Craig remote)
+**Current Phase**: Fix ERA5 leak — port WattCast historical forecast provider
+**Active task file**: `.claude/tasks/fix-era5-leak-wattcast-port.md`
 **Budget**: 5 hours (Wed 2h + Thu 3h), ~10 core_piv_loop passes
 
 ---
